@@ -14,7 +14,7 @@ import {
 
 export interface CompletionResult {
   success: boolean;
-  method: "svg" | "aria-label" | "text" | "timeout" | "none";
+  method: "svg" | "aria-label" | "text" | "content" | "timeout" | "none";
   elapsed: number;
 }
 
@@ -80,9 +80,20 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
           log.info("⏳ Button not found, trying text detection (multi-lang)...");
 
           // Text fallback: Poll until overall deadline
+          // Also detects completion via main-col content stability (language-independent,
+          // immune to selector rot): answer is done when its text stops growing.
+          let lastContentLen: number | null = null;
           while (Date.now() < overallDeadline && !aiReady) {
             try {
-              const bodyText = await page.evaluate(() => document.body.innerText);
+              const { bodyText, contentLen } = await page.evaluate(() => {
+                const mc = document.querySelector(
+                  '[data-container-id="main-col"]'
+                ) as HTMLElement | null;
+                return {
+                  bodyText: document.body.innerText || "",
+                  contentLen: mc ? (mc.innerText || "").trim().length : 0,
+                };
+              });
 
               // Check ALL language indicators
               for (const indicator of AI_COMPLETION_TEXT_INDICATORS) {
@@ -94,6 +105,20 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
                   return { success: true, method: "text", elapsed };
                 }
               }
+
+              // Content stability: non-trivial answer that stopped growing
+              if (
+                contentLen > 200 &&
+                lastContentLen !== null &&
+                contentLen === lastContentLen
+              ) {
+                aiReady = true;
+                const elapsed = Date.now() - startTime;
+                log.success(`✅ AI complete via stable content (${contentLen} chars)`);
+                log.info(`  ✅ AI complete (content stable) (${elapsed}ms)`);
+                return { success: true, method: "content", elapsed };
+              }
+              lastContentLen = contentLen;
             } catch (error) {
               // Check for browser closed
               const errorMsg = error instanceof Error ? error.message : String(error);

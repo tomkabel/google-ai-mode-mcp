@@ -25,14 +25,18 @@ export const CITATION_SELECTORS = [
   // Italian
   '[aria-label*="Link correlati"]',
   '[aria-label*="Fonti"]',
+  // Estonian
+  '[aria-label*="Seotud lingid" i]',
+  '[aria-label*="Allikad" i]',
   // Generic fallback (case-insensitive)
   'button[aria-label*="links" i]',
+  '[aria-label*="lingid" i]',
 ];
 
 // AI Completion Detection - Button-based (language-independent!)
-export const AI_COMPLETION_BUTTON_SVG = 'button svg[viewBox="3 3 18 18"]'; // Thumbs-up SVG
-export const AI_COMPLETION_BUTTON_ARIA = '[aria-label*="feedback" i]'; // Aria-label fallback
-export const AI_COMPLETION_TIMEOUT = 15000; // 15 seconds per method
+export const AI_COMPLETION_BUTTON_SVG = 'button svg[viewBox="3 3 18 18"]'; // Thumbs-up SVG (legacy; current Google uses 0 0 24 24)
+export const AI_COMPLETION_BUTTON_ARIA = '[aria-label*="feedback" i], [aria-label*="tagasisid" i]'; // Aria-label fallback (EN + ET)
+export const AI_COMPLETION_TIMEOUT = 8000; // 8 seconds per method (waitForSelector resolves instantly on match; cap only bounds the miss case)
 export const OVERALL_COMPLETION_TIMEOUT = 40000; // 40 seconds total
 
 // Text-based completion indicators (fallback)
@@ -60,6 +64,9 @@ export const AI_COMPLETION_TEXT_INDICATORS = [
   'Risposte IA',
   'Panoramica IA',
   "Panoramica dell'IA",
+  // Estonian
+  'AI vastused',
+  'Hea vastus',
 ];
 
 // Disclaimer cutoff markers (remove everything after these)
@@ -86,6 +93,8 @@ export const CUTOFF_MARKERS = [
   "Le risposte dell'IA possono contenere errori",
   'possono contenere errori',
   'Ulteriori informazioni',
+  // Estonian
+  'AI vastused võivad sisaldada vigu',
 ];
 
 // AI Mode not available indicators (region/language restrictions)
@@ -106,6 +115,8 @@ export const AI_MODE_NOT_AVAILABLE = [
   'La modalità IA non è disponibile nel tuo Paese o nella tua lingua',
   // Dutch
   'AI-modus is niet beschikbaar in uw land of taal',
+  // Estonian
+  'AI-režiim pole teie seadmes ega kontol praegu saadaval',
 ];
 
 // CAPTCHA error messages (language-aware)
