@@ -138,8 +138,11 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
           // NO viewport setting - use browser default (like Python skill!)
           ignoreDefaultArgs: ["--enable-automation"],
           args: BROWSER_ARGS,
-          // Add user agent for better stealth
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          // Real, consistent UA: matches installed Chrome (151) AND Linux platform.
+          // The old Windows/Chrome-131 override mismatched navigator.platform
+          // (Linux x86_64) and the real browser version - a detectable bot tell.
+          userAgent:
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
           // Set browser locale to English
           locale: "en-US",
           // Set Accept-Language header to English

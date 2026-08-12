@@ -69,6 +69,21 @@ export class SearchHandler {
       // Create new page
       const page = await context.newPage();
 
+      // Cold-profile warm-up: a fresh profile that deep-links straight to
+      // /search?udm=50 looks like a bot (no cookies, no history). Land on the
+      // homepage first so consent/session cookies are set, then search.
+      // Warm profiles (existing cookies) skip this - fast path.
+      const googleCookies = await context.cookies("https://www.google.com");
+      if (googleCookies.length === 0) {
+        log.info("🧊 Cold profile detected - warming up at google.com first");
+        await page.goto("https://www.google.com", {
+          waitUntil: "domcontentloaded",
+          timeout: CONFIG.browserTimeout,
+        });
+        // Let consent/session JS set cookies before the deep link
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+
       // Build search URL
       const searchUrl = this.buildSearchUrl(query);
       log.info(`📍 URL: ${searchUrl}`);
