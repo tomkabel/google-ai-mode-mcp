@@ -58,7 +58,19 @@ export class ToolHandler {
       await sendProgress("Navigating to Google AI Search...");
 
       // Execute search
-      const result = await this.searchHandler.executeSearch(query, options);
+      let result = await this.searchHandler.executeSearch(query, options);
+
+      // Zero-source retry: answer rendered but no citations extracted (selector rot,
+      // flaky sidebar). One bounded retry with an explicit source request.
+      if (result.success && result.sources.length === 0 && result.markdown.trim().length > 0) {
+        const retryQuery = `${query} MUST provide 3-5 sources`;
+        log.warning(`⚠️  Zero sources extracted — retrying with explicit source request`);
+        await sendProgress("No sources found — retrying with explicit source requirement...");
+        result = await this.searchHandler.executeSearch(retryQuery, options);
+        // The retry query is only a nudge for citation extraction; the result must
+        // still reflect the user's real query (don't leak the retry suffix).
+        result.query = query;
+      }
 
       // Save to file if requested and search was successful
       if (save_to_file && result.success && result.markdown) {
