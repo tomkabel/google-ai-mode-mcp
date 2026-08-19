@@ -34,7 +34,7 @@ export const CITATION_SELECTORS = [
 ];
 
 // AI Completion Detection - Button-based (language-independent!)
-export const AI_COMPLETION_BUTTON_SVG = 'button svg[viewBox="3 3 18 18"]'; // Thumbs-up SVG (legacy; current Google uses 0 0 24 24)
+export const AI_COMPLETION_BUTTON_SVG = 'button svg[viewBox="0 0 24 24"]'; // Thumbs-up SVG (current Google Material icon viewBox)
 export const AI_COMPLETION_BUTTON_ARIA = '[aria-label*="feedback" i], [aria-label*="tagasisid" i]'; // Aria-label fallback (EN + ET)
 export const AI_COMPLETION_TIMEOUT = 8000; // 8 seconds per method (waitForSelector resolves instantly on match; cap only bounds the miss case)
 export const OVERALL_COMPLETION_TIMEOUT = 40000; // 40 seconds total
@@ -66,7 +66,6 @@ export const AI_COMPLETION_TEXT_INDICATORS = [
   "Panoramica dell'IA",
   // Estonian
   'AI vastused',
-  'Hea vastus',
 ];
 
 // Disclaimer cutoff markers (remove everything after these)

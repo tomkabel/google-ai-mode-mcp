@@ -27,6 +27,8 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
   private currentHeadlessMode: boolean | null = null;
   private consecutiveCaptchas: number = 0;
+  // Detected once (cached) so the UA always matches the installed Chrome version.
+  private static cachedUserAgent: string | null = null;
 
   constructor() {
     log.info("🌐 BrowserManager initialized");
@@ -130,6 +132,13 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
     log.info(`  🚀 Launching browser (${shouldBeHeadless ? "headless" : "visible"})`);
 
     try {
+      // UA is context-level in patchright (no per-page setter), so it must be
+      // known at launch. We derive it from the *actually installed* Chrome
+      // version (cached after first detection) so it never drifts from
+      // navigator.platform / buildID - a hardcoded UA would reintroduce the
+      // detectable bot tell this PR fixes.
+      const userAgent = await this.resolveUserAgent(shouldBeHeadless);
+
       this.context = await chromium.launchPersistentContext(
         CONFIG.browserProfileDir,
         {
@@ -138,11 +147,7 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
           // NO viewport setting - use browser default (like Python skill!)
           ignoreDefaultArgs: ["--enable-automation"],
           args: BROWSER_ARGS,
-          // Real, consistent UA: matches installed Chrome (151) AND Linux platform.
-          // The old Windows/Chrome-131 override mismatched navigator.platform
-          // (Linux x86_64) and the real browser version - a detectable bot tell.
-          userAgent:
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+          ...(userAgent ? { userAgent } : {}),
           // Set browser locale to English
           locale: "en-US",
           // Set Accept-Language header to English
@@ -153,10 +158,59 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
       );
 
       log.success("✅ Browser context created");
+      if (userAgent) {
+        log.info(`  🕵️  Stealth UA: ${userAgent}`);
+      }
     } catch (error) {
       log.error(`Failed to create browser context: ${error}`);
       throw error;
     }
+  }
+
+  /**
+   * Resolve a Linux Chrome user agent that matches the installed browser version.
+   * The version is probed once from a throwaway launch and cached for the
+   * process lifetime (the binary can't change between launches).
+   */
+  private async resolveUserAgent(headless: boolean): Promise<string | null> {
+    if (BrowserManager.cachedUserAgent !== null) {
+      return BrowserManager.cachedUserAgent;
+    }
+
+    let version = "131.0.0.0"; // safe fallback if probing fails
+    let probe: BrowserContext | null = null;
+    try {
+      probe = await chromium.launchPersistentContext(
+        CONFIG.browserProfileDir,
+        {
+          channel: "chrome",
+          headless,
+          ignoreDefaultArgs: ["--enable-automation"],
+          args: BROWSER_ARGS,
+        }
+      );
+      const browser = probe.browser();
+      const rawVersion = browser ? await browser.version() : "";
+      const match = rawVersion.match(/(\d+\.\d+\.\d+\.\d+)/);
+      if (match) {
+        version = match[1];
+      }
+    } catch (error) {
+      log.warning(
+        `⚠️  Could not probe Chrome version, using fallback UA: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      if (probe) {
+        await probe.close().catch(() => {});
+      }
+    }
+
+    const ua =
+      `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
+    BrowserManager.cachedUserAgent = ua;
+    return ua;
   }
 
   /**
@@ -249,12 +303,12 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
   }
 
   /**
-   * Create a new page in the current context
+   * Create a new page in the current context.
+   * The stealth user agent is inherited from the context (set at launch).
    */
   async createPage(): Promise<Page> {
     const context = await this.getOrCreateContext();
-    const page = await context.newPage();
-    return page;
+    return context.newPage();
   }
 
   /**

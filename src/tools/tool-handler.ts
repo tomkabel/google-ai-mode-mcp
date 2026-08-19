@@ -67,6 +67,9 @@ export class ToolHandler {
         log.warning(`⚠️  Zero sources extracted — retrying with explicit source request`);
         await sendProgress("No sources found — retrying with explicit source requirement...");
         result = await this.searchHandler.executeSearch(retryQuery, options);
+        // The retry query is only a nudge for citation extraction; the result must
+        // still reflect the user's real query (don't leak the retry suffix).
+        result.query = query;
       }
 
       // Save to file if requested and search was successful

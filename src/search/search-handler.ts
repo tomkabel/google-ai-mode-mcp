@@ -66,22 +66,32 @@ export class SearchHandler {
         config.headless
       );
 
-      // Create new page
-      const page = await context.newPage();
+      // Create new page (applies the stealth user agent)
+      const page = await this.browserManager.createPage();
 
       // Cold-profile warm-up: a fresh profile that deep-links straight to
       // /search?udm=50 looks like a bot (no cookies, no history). Land on the
       // homepage first so consent/session cookies are set, then search.
       // Warm profiles (existing cookies) skip this - fast path.
+      // The warm-up is best-effort: a failure here must NOT abort the search,
+      // so we swallow errors and proceed to the normal navigation.
       const googleCookies = await context.cookies("https://www.google.com");
       if (googleCookies.length === 0) {
-        log.info("🧊 Cold profile detected - warming up at google.com first");
-        await page.goto("https://www.google.com", {
-          waitUntil: "domcontentloaded",
-          timeout: CONFIG.browserTimeout,
-        });
-        // Let consent/session JS set cookies before the deep link
-        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          log.info("🧊 Cold profile detected - warming up at google.com first");
+          await page.goto("https://www.google.com", {
+            waitUntil: "domcontentloaded",
+            timeout: CONFIG.browserTimeout,
+          });
+          // Let consent/session JS set cookies before the deep link
+          await new Promise((r) => setTimeout(r, 1500));
+        } catch (warmupError) {
+          log.warning(
+            `⚠️  Cold-profile warm-up failed (continuing anyway): ${
+              warmupError instanceof Error ? warmupError.message : String(warmupError)
+            }`
+          );
+        }
       }
 
       // Build search URL
@@ -123,11 +133,9 @@ export class SearchHandler {
           // Switch to visible mode
           await this.browserManager.switchToVisibleMode();
 
-          // Get visible context and create new page
-          const visibleContext =
-            await this.browserManager.getOrCreateContext(false);
+          // Create a new page on the visible context (applies the stealth UA)
           await page.close();
-          const visiblePage = await visibleContext.newPage();
+          const visiblePage = await this.browserManager.createPage();
 
           // Navigate again in visible mode
           await visiblePage.goto(searchUrl, {

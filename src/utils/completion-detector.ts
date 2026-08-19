@@ -7,6 +7,7 @@ import type { Page } from "patchright";
 import { log } from "./logger.js";
 import {
   AI_COMPLETION_BUTTON_ARIA,
+  AI_COMPLETION_BUTTON_SVG,
   AI_COMPLETION_TIMEOUT,
   OVERALL_COMPLETION_TIMEOUT,
   AI_COMPLETION_TEXT_INDICATORS,
@@ -42,7 +43,7 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
   if (remainingTime > 0 && !aiReady) {
     try {
       log.debug("Method 1: Attempting SVG thumbs-up icon detection...");
-      const svgSelector = 'button svg[viewBox="3 3 18 18"]'; // EXACT skill selector
+      const svgSelector = AI_COMPLETION_BUTTON_SVG;
       await page.waitForSelector(svgSelector, {
         timeout: Math.min(AI_COMPLETION_TIMEOUT, remainingTime),
         state: "visible",
@@ -80,18 +81,26 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
           log.info("⏳ Button not found, trying text detection (multi-lang)...");
 
           // Text fallback: Poll until overall deadline
-          // Also detects completion via main-col content stability (language-independent,
+          // Also detects completion via content stability (language-independent,
           // immune to selector rot): answer is done when its text stops growing.
+          // Stability is confirmed only after the content stays identical across
+          // several consecutive polls, so a brief stream stall can't false-positive.
           let lastContentLen: number | null = null;
+          let stableCount = 0;
+          const STABLE_POLLS_REQUIRED = 3; // >1 poll => tolerant of transient stalls
           while (Date.now() < overallDeadline && !aiReady) {
             try {
               const { bodyText, contentLen } = await page.evaluate(() => {
                 const mc = document.querySelector(
                   '[data-container-id="main-col"]'
                 ) as HTMLElement | null;
+                // Prefer the answer region; if Google renames it, fall back to the
+                // page body so stability detection still works instead of silently
+                // timing out. (main-col is the stable, lower-noise signal when present.)
+                const regionText = mc ? (mc.innerText || "") : (document.body.innerText || "");
                 return {
                   bodyText: document.body.innerText || "",
-                  contentLen: mc ? (mc.innerText || "").trim().length : 0,
+                  contentLen: regionText.trim().length,
                 };
               });
 
@@ -106,19 +115,27 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
                 }
               }
 
-              // Content stability: non-trivial answer that stopped growing
+              // Content stability: non-trivial answer that stopped growing.
+              // Require the size to be unchanged across multiple consecutive polls
+              // so a single >1s stream stall doesn't return a truncated answer.
               if (
                 contentLen > 200 &&
                 lastContentLen !== null &&
                 contentLen === lastContentLen
               ) {
+                stableCount++;
+              } else {
+                stableCount = 0;
+              }
+              lastContentLen = contentLen;
+
+              if (stableCount >= STABLE_POLLS_REQUIRED) {
                 aiReady = true;
                 const elapsed = Date.now() - startTime;
                 log.success(`✅ AI complete via stable content (${contentLen} chars)`);
                 log.info(`  ✅ AI complete (content stable) (${elapsed}ms)`);
                 return { success: true, method: "content", elapsed };
               }
-              lastContentLen = contentLen;
             } catch (error) {
               // Check for browser closed
               const errorMsg = error instanceof Error ? error.message : String(error);
