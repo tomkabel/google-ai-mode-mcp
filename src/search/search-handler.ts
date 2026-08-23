@@ -179,7 +179,7 @@ export class SearchHandler {
             return result;
           } catch (error) {
             if (error instanceof CaptchaTimeoutError) {
-              await visiblePage.close();
+              await visiblePage.close().catch(() => {});
 
               return {
                 success: false,
@@ -222,8 +222,8 @@ export class SearchHandler {
           return result;
         }
       } catch (error) {
-        // Close page on error
-        await page.close();
+        // Close page on error (may already be closed - don't mask the real error)
+        await page.close().catch(() => {});
         throw error;
       }
     } catch (error) {

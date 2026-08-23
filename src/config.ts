@@ -21,6 +21,7 @@ export interface Config {
   headless: boolean;
   browserTimeout: number;
   viewport: { width: number; height: number };
+  idleTimeoutMs: number; // close idle browser after N ms (0 = keep open)
 
   // Stealth Settings
   stealthEnabled: boolean;
@@ -64,6 +65,7 @@ const DEFAULTS: Config = {
   headless: true,
   browserTimeout: 30000, // 30 seconds
   viewport: { width: 1920, height: 1080 },
+  idleTimeoutMs: 600000, // close idle browser after 10 min (0 = keep open)
 
   // Stealth Settings
   stealthEnabled: true,
@@ -127,6 +129,10 @@ function applyEnvOverrides(config: Config): Config {
     browserTimeout: parseInteger(
       process.env.GOOGLE_AI_BROWSER_TIMEOUT,
       config.browserTimeout
+    ),
+    idleTimeoutMs: parseInteger(
+      process.env.GOOGLE_AI_IDLE_TIMEOUT_MS,
+      config.idleTimeoutMs
     ),
 
     // Stealth Settings

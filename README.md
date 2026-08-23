@@ -286,6 +286,7 @@ Works out of the box. Advanced users can tune behaviour via environment variable
 # Browser
 export GOOGLE_AI_HEADLESS=true            # Run browser invisibly
 export GOOGLE_AI_STEALTH_ENABLED=true     # Anti-detection techniques
+export GOOGLE_AI_IDLE_TIMEOUT_MS=600000   # Close idle browser after 10 min (0 = keep open)
 
 # Timeouts
 export GOOGLE_AI_RESPONSE_TIMEOUT=30000   # 30s to get the AI response
@@ -301,6 +302,7 @@ export GOOGLE_AI_CAPTCHA_COOLDOWN_MS=30000
 | --- | --- | --- |
 | `GOOGLE_AI_HEADLESS` | `true` | Invisible browser |
 | `GOOGLE_AI_BROWSER_TIMEOUT` | `30000` | Browser nav timeout (ms) |
+| `GOOGLE_AI_IDLE_TIMEOUT_MS` | `600000` | Close idle browser after N ms (0 = keep open) |
 | `GOOGLE_AI_STEALTH_ENABLED` | `true` | Enable stealth mode |
 | `GOOGLE_AI_STEALTH_RANDOM_DELAYS` | `true` | Random delays between actions |
 | `GOOGLE_AI_STEALTH_HUMAN_TYPING` | `true` | Human-like typing |
@@ -311,6 +313,14 @@ export GOOGLE_AI_CAPTCHA_COOLDOWN_MS=30000
 | `GOOGLE_AI_RESPONSE_TIMEOUT` | `30000` | Search response timeout (ms) |
 | `GOOGLE_AI_CITATION_TIMEOUT` | `5000` | Citation extraction timeout (ms) |
 | `GOOGLE_AI_PROFILE_DIR` | auto | Custom browser profile dir |
+
+---
+
+## ♻️ Process lifecycle
+
+- **Shared, persistent browser.** A single Chrome context is reused across searches instead of relaunching per request.
+- **Closes when idle.** After `GOOGLE_AI_IDLE_TIMEOUT_MS` of no open pages the browser closes on its own; the next search relaunches it. The idle timer only arms when no search is in flight, so a long CAPTCHA wait is never cut short. Set to `0` to keep the browser open forever.
+- **Exits with its host.** When the MCP host disconnects (stdin EOF), the server shuts down and its Chrome tree is reaped — no orphaned browser processes.
 
 ---
 

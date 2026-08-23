@@ -52,7 +52,7 @@ class GoogleAiSearchMCPServer {
     this.server = new Server(
       {
         name: "google-ai-mode-mcp",
-        version: "1.0.0",
+        version: "1.0.3",
       },
       {
         capabilities: {
@@ -72,7 +72,7 @@ class GoogleAiSearchMCPServer {
     this.setupShutdownHandlers();
 
     log.info("🚀 Google AI Search Mode MCP Server initialized");
-    log.info(`  Version: 1.0.0`);
+    log.info(`  Version: 1.0.3`);
     log.info(`  Node: ${process.version}`);
     log.info(`  Platform: ${process.platform}`);
   }
@@ -258,6 +258,10 @@ class GoogleAiSearchMCPServer {
     process.on("SIGINT", () => requestShutdown("SIGINT"));
     process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
+    // Host died without sending a signal (MCP over stdio): stdin hits EOF.
+    // Without this the server + its Chrome tree leak forever.
+    process.stdin.on("close", () => requestShutdown("stdin closed (host disconnected)"));
+
     process.on("uncaughtException", (error) => {
       log.error(`💥 Uncaught exception: ${error}`);
       log.error(error.stack || "");
@@ -310,7 +314,7 @@ async function main() {
   // Print banner
   console.error("╔══════════════════════════════════════════════════════════╗");
   console.error("║                                                          ║");
-  console.error("║        Google AI Search Mode MCP Server v1.0.0          ║");
+  console.error("║        Google AI Search Mode MCP Server v1.0.3          ║");
   console.error("║                                                          ║");
   console.error("║   Search Google AI Mode with CAPTCHA handling via MCP   ║");
   console.error("║                                                          ║");

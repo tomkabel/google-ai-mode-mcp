@@ -27,6 +27,11 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
   private currentHeadlessMode: boolean | null = null;
   private consecutiveCaptchas: number = 0;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private openPages = 0;
+  // Serializes launch/recreate so concurrent search_ai calls can't both
+  // launchPersistentContext on the same profile dir (Chrome profile lock).
+  private launchChain: Promise<unknown> = Promise.resolve();
   // Detected once (cached) so the UA always matches the installed Chrome version.
   private static cachedUserAgent: string | null = null;
 
@@ -39,20 +44,45 @@ export class BrowserManager {
    * Get or create the browser context
    */
   async getOrCreateContext(headless?: boolean): Promise<BrowserContext> {
-    // Check if headless mode needs to be changed
-    if (this.needsHeadlessModeChange(headless)) {
-      log.warning("🔄 Headless mode change - recreating context...");
-      await this.closeContext();
-    }
+    const run = this.launchChain.then(async () => {
+      // Check if headless mode needs to be changed
+      if (this.needsHeadlessModeChange(headless)) {
+        log.warning("🔄 Headless mode change - recreating context...");
+        await this.closeContext();
+      }
 
-    // Check if context needs recreation
-    if (await this.needsRecreation()) {
-      await this.recreateContext(headless);
-    } else {
-      log.success("♻️  Reusing existing context");
-    }
+      // Check if context needs recreation
+      if (await this.needsRecreation()) {
+        await this.recreateContext(headless);
+      } else {
+        log.success("♻️  Reusing existing context");
+      }
+    });
+    // Chain stays healthy even when a launch fails; the awaiting caller gets the error.
+    this.launchChain = run.catch(() => {});
 
+    await run;
     return this.context!;
+  }
+
+  /**
+   * Close the browser after a period of inactivity so an idle MCP server
+   * doesn't pin a full Chrome tree for hours (next search relaunches it).
+   * Only armed while no pages are open, so a long search (e.g. CAPTCHA wait)
+   * can never be killed mid-flight.
+   */
+  private clearIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private startIdleTimer(): void {
+    this.clearIdleTimer();
+    if (CONFIG.idleTimeoutMs <= 0 || !this.context || this.openPages > 0) return;
+    this.idleTimer = setTimeout(() => {
+      log.info(`⏳ No activity for ${CONFIG.idleTimeoutMs}ms - closing idle browser`);
+      this.closeContext().catch((e) => log.warning(`Idle close failed: ${e}`));
+    }, CONFIG.idleTimeoutMs);
   }
 
   /**
@@ -161,6 +191,8 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
       if (userAgent) {
         log.info(`  🕵️  Stealth UA: ${userAgent}`);
       }
+      // No pages open yet - arm the idle close.
+      this.startIdleTimer();
     } catch (error) {
       log.error(`Failed to create browser context: ${error}`);
       throw error;
@@ -217,6 +249,7 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
    * Close the browser context
    */
   async closeContext(): Promise<void> {
+    this.clearIdleTimer();
     if (this.context) {
       try {
         log.info("🗑️  Closing browser context...");
@@ -308,7 +341,14 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
    */
   async createPage(): Promise<Page> {
     const context = await this.getOrCreateContext();
-    return context.newPage();
+    const page = await context.newPage();
+    this.openPages++;
+    this.clearIdleTimer();
+    page.once("close", () => {
+      this.openPages--;
+      this.startIdleTimer();
+    });
+    return page;
   }
 
   /**
