@@ -27,6 +27,11 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
   private currentHeadlessMode: boolean | null = null;
   private consecutiveCaptchas: number = 0;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private openPages = 0;
+  // Serializes launch/recreate so concurrent search_ai calls can't both
+  // launchPersistentContext on the same profile dir (Chrome profile lock).
+  private launchChain: Promise<unknown> = Promise.resolve();
   // Detected once (cached) so the UA always matches the installed Chrome version.
   private static cachedUserAgent: string | null = null;
 
@@ -38,21 +43,67 @@ export class BrowserManager {
   /**
    * Get or create the browser context
    */
+  /**
+   * Serialize every context lifecycle mutation (create/close/recreate) onto a
+   * single promise chain so an idle close, a CAPTCHA restart, and a new search
+   * can never run `launchPersistentContext`/`context.close()` against the same
+   * profile dir concurrently (Chrome profile-lock race).
+   */
+  private serialize<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.launchChain.then(op);
+    // Chain stays healthy even when an op fails; the awaiting caller gets the error.
+    this.launchChain = run.then(
+      () => {},
+      () => {}
+    );
+    return run;
+  }
+
   async getOrCreateContext(headless?: boolean): Promise<BrowserContext> {
-    // Check if headless mode needs to be changed
-    if (this.needsHeadlessModeChange(headless)) {
-      log.warning("🔄 Headless mode change - recreating context...");
-      await this.closeContext();
-    }
+    await this.serialize(async () => {
+      // Acquiring the context for use - cancel any pending idle close so it
+      // can't fire mid-search (openPages re-arms it once pages hit zero).
+      this.clearIdleTimer();
 
-    // Check if context needs recreation
-    if (await this.needsRecreation()) {
-      await this.recreateContext(headless);
-    } else {
-      log.success("♻️  Reusing existing context");
-    }
+      // Check if headless mode needs to be changed
+      if (this.needsHeadlessModeChange(headless)) {
+        log.warning("🔄 Headless mode change - recreating context...");
+        await this.closeContext();
+      }
 
+      // Check if context needs recreation
+      if (await this.needsRecreation()) {
+        await this.recreateContext(headless);
+      } else {
+        log.success("♻️  Reusing existing context");
+      }
+    });
     return this.context!;
+  }
+
+  /**
+   * Close the browser after a period of inactivity so an idle MCP server
+   * doesn't pin a full Chrome tree for hours (next search relaunches it).
+   * Only armed while no pages are open, so a long search (e.g. CAPTCHA wait)
+   * can never be killed mid-flight.
+   */
+  private clearIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private startIdleTimer(): void {
+    this.clearIdleTimer();
+    if (CONFIG.idleTimeoutMs <= 0 || !this.context || this.openPages > 0) return;
+    this.idleTimer = setTimeout(() => {
+      // Route the close through the same serialization chain and re-check that
+      // no page was acquired between the timer firing and the op running.
+      this.serialize(async () => {
+        if (this.openPages > 0 || !this.context) return;
+        log.info(`⏳ No activity for ${CONFIG.idleTimeoutMs}ms - closing idle browser`);
+        await this.closeContext();
+      }).catch((e) => log.warning(`Idle close failed: ${e}`));
+    }, CONFIG.idleTimeoutMs);
   }
 
   /**
@@ -161,6 +212,8 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
       if (userAgent) {
         log.info(`  🕵️  Stealth UA: ${userAgent}`);
       }
+      // No pages open yet - arm the idle close.
+      this.startIdleTimer();
     } catch (error) {
       log.error(`Failed to create browser context: ${error}`);
       throw error;
@@ -217,6 +270,7 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
    * Close the browser context
    */
   async closeContext(): Promise<void> {
+    this.clearIdleTimer();
     if (this.context) {
       try {
         log.info("🗑️  Closing browser context...");
@@ -263,16 +317,20 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
   async restartBrowser(reason: string): Promise<void> {
     log.warning(`🔄 Restarting browser (${reason})...`);
 
-    await this.closeContext();
+    // One serialized op so a concurrent search can't launch on the profile
+    // dir while this close/recreate cycle is mid-flight.
+    await this.serialize(async () => {
+      await this.closeContext();
 
-    // Wait for cooldown
-    log.info(`⏸️  Cooldown: ${CONFIG.captchaCooldownMs}ms...`);
-    await new Promise((resolve) =>
-      setTimeout(resolve, CONFIG.captchaCooldownMs)
-    );
+      // Wait for cooldown
+      log.info(`⏸️  Cooldown: ${CONFIG.captchaCooldownMs}ms...`);
+      await new Promise((resolve) =>
+        setTimeout(resolve, CONFIG.captchaCooldownMs)
+      );
 
-    // Recreate with random viewport
-    await this.recreateContext();
+      // Recreate with random viewport
+      await this.recreateContext();
+    });
 
     log.success("✅ Browser restarted");
   }
@@ -307,8 +365,24 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
    * The stealth user agent is inherited from the context (set at launch).
    */
   async createPage(): Promise<Page> {
-    const context = await this.getOrCreateContext();
-    return context.newPage();
+    // Reserve the page slot BEFORE any await so an idle timer that fires while
+    // the context/page is being created sees openPages > 0 and won't close it.
+    this.openPages++;
+    this.clearIdleTimer();
+    try {
+      const context = await this.getOrCreateContext();
+      const page = await context.newPage();
+      page.once("close", () => {
+        this.openPages--;
+        this.startIdleTimer();
+      });
+      return page;
+    } catch (error) {
+      // Creation failed - release the reservation and re-arm the idle timer.
+      this.openPages--;
+      this.startIdleTimer();
+      throw error;
+    }
   }
 
   /**

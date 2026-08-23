@@ -76,7 +76,7 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
 
         } catch (ariaError) {
           // Method 3: Text-based detection (multi-language fallback)
-          log.debug(`Method 2 failed: ${svgError instanceof Error ? svgError.message : String(svgError)}`);
+          log.debug(`Method 2 failed: ${ariaError instanceof Error ? ariaError.message : String(ariaError)}`);
           log.debug("Both button methods failed, trying text detection...");
           log.info("⏳ Button not found, trying text detection (multi-lang)...");
 
