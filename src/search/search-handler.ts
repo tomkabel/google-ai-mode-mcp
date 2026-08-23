@@ -68,6 +68,9 @@ export class SearchHandler {
 
       // Create new page (applies the stealth user agent)
       const page = await this.browserManager.createPage();
+      // Track whichever page is currently open so the error handler closes the
+      // right one (it becomes the visible page after a CAPTCHA switch).
+      let activePage = page;
 
       // Cold-profile warm-up: a fresh profile that deep-links straight to
       // /search?udm=50 looks like a bot (no cookies, no history). Land on the
@@ -136,6 +139,7 @@ export class SearchHandler {
           // Create a new page on the visible context (applies the stealth UA)
           await page.close();
           const visiblePage = await this.browserManager.createPage();
+          activePage = visiblePage;
 
           // Navigate again in visible mode
           await visiblePage.goto(searchUrl, {
@@ -222,8 +226,9 @@ export class SearchHandler {
           return result;
         }
       } catch (error) {
-        // Close page on error (may already be closed - don't mask the real error)
-        await page.close().catch(() => {});
+        // Close the currently-active page on error (visible page after a CAPTCHA
+        // switch). May already be closed - don't mask the real error.
+        await activePage.close().catch(() => {});
         throw error;
       }
     } catch (error) {
