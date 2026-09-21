@@ -1,13 +1,14 @@
 {
   "name": "google-ai-mode-mcp",
   "version": "1.1.0",
-  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research — Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
+  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research \u2014 Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
   "type": "module",
   "bin": {
     "google-ai-mode-mcp": "dist/index.js"
   },
   "files": [
     "dist",
+    "extensions",
     "README.md",
     "LICENSE"
   ],
@@ -37,9 +38,11 @@
     "patchright",
     "cursor",
     "cline",
-    "windsurf"
+    "windsurf",
+    "hermes-agent",
+    "pi-package"
   ],
-  "author": "Gérôme Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
+  "author": "G\u00e9r\u00f4me Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -66,5 +69,10 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
   }
 }

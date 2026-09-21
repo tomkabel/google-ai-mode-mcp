@@ -137,6 +137,23 @@ gemini mcp add google-ai-mode npx -y google-ai-mode-mcp@latest --scope user
 code --add-mcp '{"name":"google-ai-search","command":"npx","args":["google-ai-mode-mcp@latest"]}'
 ```
 
+**Hermes Agent** — add to `~/.hermes/config.yaml` under `mcp_servers:`:
+```yaml
+mcp_servers:
+  google-ai-search:
+    command: npx
+    args: ["google-ai-mode-mcp@latest"]
+    connect_timeout: 45.0
+    enabled: true
+```
+
+**pi** (no built-in MCP client; this repo ships a pi extension that bridges it)
+```bash
+git clone https://github.com/tomkabel/google-ai-mode-mcp && cd google-ai-mode-mcp
+npm install && npm run build
+pi install "$PWD"        # registers extensions/google-ai-search.ts → `search_ai` tool
+```
+
 **Cursor, Windsurf, Zed, or any other MCP client** — add to your config file:
 
 ```json
