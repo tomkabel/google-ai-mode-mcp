@@ -92,7 +92,9 @@ class GoogleAiSearchMCPServer {
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      const progressToken = (args as any)?._meta?.progressToken;
+      // Spec puts _meta on params, not inside arguments - reading it from args
+      // meant progressToken was always undefined and no progress was ever sent.
+      const progressToken = request.params._meta?.progressToken;
 
       log.info(`🔧 [MCP] Tool call: ${name}`);
       if (progressToken) {
@@ -133,6 +135,7 @@ class GoogleAiSearchMCPServer {
           default:
             log.error(`❌ [MCP] Unknown tool: ${name}`);
             return {
+              isError: true,
               content: [
                 {
                   type: "text",
@@ -164,6 +167,7 @@ class GoogleAiSearchMCPServer {
         log.error(`❌ [MCP] Tool execution error: ${errorMessage}`);
 
         return {
+          isError: true,
           content: [
             {
               type: "text",
@@ -228,7 +232,7 @@ class GoogleAiSearchMCPServer {
   private setupShutdownHandlers(): void {
     let shuttingDown = false;
 
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string, exitCode = 0) => {
       if (shuttingDown) {
         return;
       }
@@ -244,15 +248,15 @@ class GoogleAiSearchMCPServer {
         await this.server.close();
 
         log.success("✅ Shutdown complete");
-        process.exit(0);
+        process.exit(exitCode);
       } catch (error) {
         log.error(`❌ Error during shutdown: ${error}`);
         process.exit(1);
       }
     };
 
-    const requestShutdown = (signal: string) => {
-      void shutdown(signal);
+    const requestShutdown = (signal: string, exitCode = 0) => {
+      void shutdown(signal, exitCode);
     };
 
     process.on("SIGINT", () => requestShutdown("SIGINT"));
@@ -265,13 +269,14 @@ class GoogleAiSearchMCPServer {
     process.on("uncaughtException", (error) => {
       log.error(`💥 Uncaught exception: ${error}`);
       log.error(error.stack || "");
-      requestShutdown("uncaughtException");
+      // Crash exits non-zero so supervisors/MCP hosts see a failure, not a clean stop.
+      requestShutdown("uncaughtException", 1);
     });
 
     process.on("unhandledRejection", (reason, promise) => {
       log.error(`💥 Unhandled rejection at: ${promise}`);
       log.error(`Reason: ${reason}`);
-      requestShutdown("unhandledRejection");
+      requestShutdown("unhandledRejection", 1);
     });
   }
 

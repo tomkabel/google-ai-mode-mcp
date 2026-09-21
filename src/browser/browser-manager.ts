@@ -226,6 +226,15 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
    * process lifetime (the binary can't change between launches).
    */
   private async resolveUserAgent(headless: boolean): Promise<string | null> {
+    // Patchright's own guidance is to ship NO userAgent override, because any
+    // override risks contradicting the real fingerprint. The string below is
+    // Linux-only; on macOS/Windows it would claim "X11; Linux x86_64" while
+    // navigator.platform says MacIntel/Win32 - a louder bot tell than sending
+    // Chrome's own UA. So: override only where it is true.
+    if (process.platform !== "linux") {
+      return null;
+    }
+
     if (BrowserManager.cachedUserAgent !== null) {
       return BrowserManager.cachedUserAgent;
     }
@@ -243,7 +252,7 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
         }
       );
       const browser = probe.browser();
-      const rawVersion = browser ? await browser.version() : "";
+      const rawVersion = browser ? browser.version() : "";
       const match = rawVersion.match(/(\d+\.\d+\.\d+\.\d+)/);
       if (match) {
         version = match[1];
@@ -328,9 +337,13 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
         setTimeout(resolve, CONFIG.captchaCooldownMs)
       );
 
-      // Recreate with random viewport
       await this.recreateContext();
     });
+
+    // The restart IS the remedy for the CAPTCHA streak. Without this reset the
+    // counter stays at the limit, so the next CAPTCHA restarts again instead of
+    // opening the visible browser - the user never gets a chance to solve one.
+    this.consecutiveCaptchas = 0;
 
     log.success("✅ Browser restarted");
   }

@@ -14,7 +14,7 @@ import { BrowserManager } from "../browser/browser-manager.js";
 import { CaptchaDetector } from "../browser/captcha-detector.js";
 import { ResponseParser } from "./response-parser.js";
 import { MarkdownConverter } from "./markdown-converter.js";
-import { CONFIG, applyBrowserOptions } from "../config.js";
+import { applyBrowserOptions } from "../config.js";
 import { log } from "../utils/logger.js";
 import { CaptchaTimeoutError } from "../errors.js";
 import { waitForAiCompletion, checkAiModeAvailability } from "../utils/completion-detector.js";
@@ -84,7 +84,7 @@ export class SearchHandler {
           log.info("🧊 Cold profile detected - warming up at google.com first");
           await page.goto("https://www.google.com", {
             waitUntil: "domcontentloaded",
-            timeout: CONFIG.browserTimeout,
+            timeout: config.browserTimeout,
           });
           // Let consent/session JS set cookies before the deep link
           await new Promise((r) => setTimeout(r, 1500));
@@ -106,7 +106,7 @@ export class SearchHandler {
         log.info("🌐 Navigating to Google AI Search...");
         await page.goto(searchUrl, {
           waitUntil: "domcontentloaded",
-          timeout: CONFIG.browserTimeout,
+          timeout: config.browserTimeout,
         });
 
         // Check for CAPTCHA (immediate)
@@ -144,7 +144,7 @@ export class SearchHandler {
           // Navigate again in visible mode
           await visiblePage.goto(searchUrl, {
             waitUntil: "domcontentloaded",
-            timeout: CONFIG.browserTimeout,
+            timeout: config.browserTimeout,
           });
 
           // Handle CAPTCHA (wait for solution)

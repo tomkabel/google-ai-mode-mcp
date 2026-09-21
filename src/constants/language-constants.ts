@@ -28,15 +28,21 @@ export const CITATION_SELECTORS = [
   // Estonian
   '[aria-label*="Seotud lingid" i]',
   '[aria-label*="Allikad" i]',
+  // Live label format (verified 2026-09): "<Publisher> (+N) – <Title>. <Related results>"
+  // Button-scoped: the same label is also on a sibling <a>, and matching both
+  // would inject two markers per citation.
+  'button[aria-label*="Seotud tulemused" i]',
+  'button[aria-label*="Related results" i]',
   // Generic fallback (case-insensitive)
   'button[aria-label*="links" i]',
   '[aria-label*="lingid" i]',
 ];
 
-// AI Completion Detection - Button-based (language-independent!)
-export const AI_COMPLETION_BUTTON_SVG = 'button svg[viewBox="0 0 24 24"]'; // Thumbs-up SVG (current Google Material icon viewBox)
-export const AI_COMPLETION_BUTTON_ARIA = '[aria-label*="feedback" i], [aria-label*="tagasisid" i]'; // Aria-label fallback (EN + ET)
-export const AI_COMPLETION_TIMEOUT = 8000; // 8 seconds per method (waitForSelector resolves instantly on match; cap only bounds the miss case)
+// AI Completion Detection - feedback button that appears once streaming ends.
+// NOTE: a generic `button svg[viewBox="0 0 24 24"]` selector was removed here -
+// it matched Google's nav icons ~400ms after load, i.e. before the answer
+// existed, so completion "succeeded" against an empty page.
+export const AI_COMPLETION_BUTTON_ARIA = '[aria-label*="feedback" i], [aria-label*="tagasisid" i]'; // Aria-label (EN + ET)
 export const OVERALL_COMPLETION_TIMEOUT = 40000; // 40 seconds total
 
 // Text-based completion indicators (fallback)

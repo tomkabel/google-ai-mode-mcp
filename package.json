@@ -16,6 +16,8 @@
     "postbuild": "chmod +x dist/index.js",
     "watch": "tsc --watch",
     "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepare": "npm run build"
   },
   "keywords": [
@@ -53,10 +55,11 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.5",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^5.0.1"
   },
   "engines": {
     "node": ">=18.0.0"

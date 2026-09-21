@@ -85,10 +85,14 @@ export class MarkdownConverter {
       let modifiedMd = markdown;
       const citationSources: Source[] = [];
 
-      // Sort citations by marker_id (highest first) to preserve indices during replacement
-      // EXACT SKILL LOGIC: sorted(citations, key=lambda c: c['marker_id'], reverse=True)
+      // Document order: marker_id is assigned top-to-bottom during injection, so
+      // ascending order makes footnote [1] the first citation a reader meets and
+      // keeps the Sources list in the same order as the text.
+      // (The reverse sort this was ported from needed `|| 999`, which mis-sorted
+      // marker_id 0 because 0 is falsy; each marker is replaced by its own
+      // distinct string, so replacement order never mattered in the first place.)
       const citationsSorted = [...citations].sort(
-        (a, b) => (b.marker_id || 999) - (a.marker_id || 999)
+        (a, b) => (a.marker_id ?? 0) - (b.marker_id ?? 0)
       );
 
       for (const citation of citationsSorted) {

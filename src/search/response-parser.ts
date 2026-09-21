@@ -1,11 +1,16 @@
 /**
  * Response Parser for Google AI Search Mode
  *
- * EXACT 1:1 PORT of DOM_INJECTION_SCRIPT from Python skill!
- * Based on SERPO's proven extraction method.
+ * Injects [CITE-N] markers next to each citation button and reads the source
+ * off the button itself: the aria-label carries "<Publisher> (+N) – <Title>"
+ * and the adjacent anchor carries the link.
+ *
+ * The page script stays deliberately dumb (collect label + href); all parsing
+ * happens in Node where it is unit-testable.
  */
 
 import type { Page } from "patchright";
+import type { Citation, Source } from "../types.js";
 import { log } from "../utils/logger.js";
 import { CONFIG } from "../config.js";
 import { CitationExtractionError } from "../errors.js";
@@ -14,18 +19,75 @@ import { CITATION_SELECTORS } from "../constants/language-constants.js";
 // DOM selectors
 const MAIN_CONTAINER = '[data-container-id="main-col"]';
 
+/** Trailing "related results" phrasing Google appends to every citation label. */
+const LABEL_SUFFIXES = [
+  "Seotud tulemused",
+  "Related results",
+  "Zugehörige Ergebnisse",
+  "Résultats associés",
+  "Resultados relacionados",
+  "Risultati correlati",
+  "Gerelateerde resultaten",
+];
+
+export interface RawCitation {
+  marker_id: number;
+  label: string;
+  url: string | null;
+}
+
+/**
+ * Turn a citation button's aria-label + href into a Source.
+ * Label shape: "QuEra Computing (+1) – What Is Quantum Tunneling? - QuEra. Seotud tulemused"
+ * Returns null when the label carries no publisher/title (e.g. the bare
+ * "Seotud tulemused" group button) or when there is no link to cite.
+ */
+export function citationFromLabel(label: string, url: string | null): Source | null {
+  if (!url) return null;
+
+  let text = (label || "").trim();
+  for (const suffix of LABEL_SUFFIXES) {
+    if (text.toLowerCase().endsWith(suffix.toLowerCase())) {
+      text = text.slice(0, text.length - suffix.length).trim();
+      break;
+    }
+  }
+  text = text.replace(/[.\s]+$/, "");
+  if (!text) return null;
+
+  // Publisher and title are separated by an en/em dash; the "(+N)" counts extra
+  // sources collapsed into the same chip and is noise for a citation list.
+  const [publisherPart, ...titleParts] = text.split(/\s*[–—]\s+/);
+  const publisher = publisherPart.replace(/\s*\(\+\d+\)\s*$/, "").trim();
+  const title = titleParts.join(" – ").trim();
+
+  if (!publisher && !title) return null;
+
+  return {
+    title: title || publisher,
+    url,
+    domain: publisher || hostnameOf(url),
+  };
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
 export class ResponseParser {
   /**
-   * Extract AI response HTML and citations from the page
-   * EXACT 1:1 CLONE of Python skill's DOM_INJECTION_SCRIPT!
+   * Extract AI response HTML (with [CITE-N] markers injected) and its citations.
    */
   async extractAiResponse(
     page: Page
-  ): Promise<{ html: string; citations: any[] }> {
+  ): Promise<{ html: string; citations: Citation[] }> {
     try {
       log.info("📚 Injecting Markers & Extracting Sources...");
 
-      // Wait for main container to be visible
       try {
         await page.waitForSelector(MAIN_CONTAINER, {
           state: "visible",
@@ -36,9 +98,26 @@ export class ResponseParser {
         throw new CitationExtractionError("AI Overview container not found");
       }
 
-      // Execute DOM injection script (1:1 clone from Python skill)
+      // Expand collapsed sections first, then give the page a real (non-blocking)
+      // tick to render. The previous implementation busy-waited inside
+      // evaluate(), which pins the page's only JS thread - nothing it waited
+      // for could ever happen.
+      await page.evaluate(() => {
+        const mainCol = document.querySelector('[data-container-id="main-col"]');
+        if (!mainCol) return;
+        const expandLabels = ["Show more", "Mehr anzeigen", "Meer weergeven", "Kuva rohkem"];
+        for (const btn of Array.from(
+          mainCol.querySelectorAll('[aria-expanded="false"]')
+        )) {
+          const el = btn as HTMLElement;
+          if (expandLabels.some((t) => (el.innerText || "").includes(t))) {
+            el.click();
+          }
+        }
+      });
+      await page.waitForTimeout(300);
+
       const result = await page.evaluate((selectors) => {
-        // Helper: Check if element is visually visible to user
         function isVisible(el: any): boolean {
           if (!el) return false;
           const style = window.getComputedStyle(el);
@@ -53,205 +132,92 @@ export class ResponseParser {
           );
         }
 
-        // Find main container
         const mainCol = document.querySelector('[data-container-id="main-col"]');
         if (!mainCol) {
           return { error: "main-col not found (AI Overview missing?)" };
         }
 
-        // SERPO OPTIMIZATION: Expand "Show more" buttons first
-        try {
-          const showMoreBtns = Array.from(
-            mainCol.querySelectorAll('[aria-expanded="false"]')
-          );
-          for (const btn of showMoreBtns) {
-            const btnEl = btn as HTMLElement;
-            if (
-              isVisible(btnEl) &&
-              (btnEl.innerText.includes("Show more") ||
-                btnEl.innerText.includes("Mehr anzeigen") ||
-                btnEl.innerText.includes("Meer weergeven"))
-            ) {
-              (btnEl as any).click();
-              // Small delay for expansion
-              const waitSync = (ms: number) => {
-                const start = Date.now();
-                while (Date.now() - start < ms) {
-                  // Busy wait
-                }
-              };
-              waitSync(200);
-            }
-          }
-        } catch (e) {
-          console.warn("Show more expansion failed", e);
-        }
-
-        // MULTI-LANGUAGE: Try citation selectors in order
         let buttons: Element[] = [];
-
         for (const selector of selectors) {
-          buttons = Array.from(mainCol.querySelectorAll(selector));
-          if (buttons.filter((b) => isVisible(b as HTMLElement)).length > 0) {
-            console.log(
-              `Found ${buttons.length} citation buttons with: ${selector}`
-            );
+          const found = Array.from(mainCol.querySelectorAll(selector));
+          if (found.some((b) => isVisible(b as HTMLElement))) {
+            buttons = found;
             break;
           }
         }
 
-        const allCitations: any[] = [];
+        const citations: { marker_id: number; label: string; url: string | null }[] = [];
         let markerIndex = 0;
 
-        // FOR EACH BUTTON: Mark → Click → Extract (SERPO method!)
         for (const btn of buttons) {
           const btnEl = btn as HTMLElement;
-
-          // Skip invisible "ghost" buttons in DOM
           if (!isVisible(btnEl)) continue;
 
-          // 1. Insert visual marker [CITE-N] (SERPO: wrapped in <code> tag!)
+          // The link lives on the button itself, an ancestor, or a sibling
+          // inside the same chip - take the first one that exists.
+          const anchor =
+            (btnEl.closest("a[href]") as HTMLAnchorElement | null) ??
+            (btnEl.parentElement?.querySelector("a[href]") as HTMLAnchorElement | null) ??
+            null;
+
+          const label = btnEl.getAttribute("aria-label") || "";
+          if (!anchor && !label) continue;
+
           const markerId = markerIndex++;
           const marker = document.createElement("span");
           marker.className = "citation-marker";
-          marker.innerHTML = `<code>[CITE-${markerId}]</code>`; // Code-tag wrap!
-
-          // Place marker after button
+          marker.innerHTML = `<code>[CITE-${markerId}]</code>`;
           if (btnEl.nextSibling) {
             btnEl.parentNode?.insertBefore(marker, btnEl.nextSibling);
           } else {
             btnEl.parentNode?.appendChild(marker);
           }
 
-          // 2. Click button to load sources in sidebar
-          try {
-            btnEl.scrollIntoView({ behavior: "instant", block: "center" });
-
-            // Count visible links BEFORE click
-            const countVisibleLinks = () => {
-              const rhsCol = document.querySelector('[data-container-id="rhs-col"]');
-              if (!rhsCol) return 0;
-              return Array.from(rhsCol.querySelectorAll("a[href]")).filter((l) =>
-                isVisible(l as HTMLElement)
-              ).length;
-            };
-            const beforeCount = countVisibleLinks();
-
-            (btnEl as any).click();
-
-            // SMART WAIT: Wait until links change (max 300ms)
-            const startTime = Date.now();
-            while (Date.now() - startTime < 300) {
-              // Poll every 10ms
-              const waitSync = (ms: number) => {
-                const start = Date.now();
-                while (Date.now() - start < ms) {
-                  // Busy wait
-                }
-              };
-              waitSync(10);
-
-              if (countVisibleLinks() !== beforeCount) break;
-            }
-
-            // Short buffer for animations
-            const waitSync = (ms: number) => {
-              const start = Date.now();
-              while (Date.now() - start < ms) {
-                // Busy wait
-              }
-            };
-            waitSync(50);
-          } catch (e) {
-            console.warn("Click failed", e);
-          }
-
-          // 3. Extract sources from sidebar (rhs-col)
-          const sources: any[] = [];
-          const seen = new Set<string>();
-          const rhsCol = document.querySelector('[data-container-id="rhs-col"]');
-
-          if (rhsCol) {
-            const links = Array.from(rhsCol.querySelectorAll("a[href]"));
-            for (const link of links) {
-              const linkEl = link as HTMLAnchorElement;
-
-              if (!isVisible(linkEl)) continue;
-
-              const url = linkEl.href;
-              const title =
-                linkEl.innerText.trim() ||
-                linkEl.getAttribute("aria-label") ||
-                "";
-
-              // Filter Google internal domains
-              const skipDomains = [
-                "google.com",
-                "google.de",
-                "gstatic.com",
-                "support.google.com",
-              ];
-
-              if (
-                url &&
-                url.startsWith("http") &&
-                !skipDomains.some((d) => url.includes(d)) &&
-                !seen.has(url)
-              ) {
-                seen.add(url);
-                sources.push({
-                  title: title,
-                  url: url,
-                  source: new URL(url).hostname,
-                });
-              }
-            }
-          }
-
-          allCitations.push({ marker_id: markerId, sources: sources });
+          citations.push({
+            marker_id: markerId,
+            label,
+            // href is already absolute; Google currently serves an opaque
+            // /goto?url=... redirect rather than the publisher URL.
+            url: anchor ? anchor.href : null,
+          });
         }
 
-        // Return: Modified HTML (with markers) + extracted sources
-        return {
-          html: mainCol.innerHTML,
-          citations: allCitations,
-        };
+        return { html: mainCol.innerHTML, citations };
       }, CITATION_SELECTORS);
 
-      // Check for errors
       if ("error" in result) {
         throw new CitationExtractionError(result.error as string);
       }
 
-      const { html, citations } = result as { html: string; citations: any[] };
+      const { html, citations: raw } = result as {
+        html: string;
+        citations: RawCitation[];
+      };
 
       if (!html || html.trim().length === 0) {
         throw new CitationExtractionError("No AI response HTML found");
       }
 
-      // Convert citations to format needed by markdown converter
-      // Keep ALL sources per citation (not just first!)
-      const formattedCitations = citations.map((c: any) => ({
-        marker_id: c.marker_id,
-        marker: `[CITE-${c.marker_id}]`,
-        sources: c.sources.map((s: any) => ({
-          title: s.title,
-          url: s.url,
-          domain: s.source,
-        })),
-      }));
+      const citations: Citation[] = raw.map((c) => {
+        const source = citationFromLabel(c.label, c.url);
+        return {
+          marker_id: c.marker_id,
+          marker: `[CITE-${c.marker_id}]`,
+          sources: source ? [source] : [],
+        };
+      });
 
-      // Count total sources
-      const totalSources = formattedCitations.reduce(
-        (sum: number, c: any) => sum + c.sources.length,
-        0
-      );
-
+      const totalSources = citations.reduce((sum, c) => sum + c.sources.length, 0);
       log.success(
         `✅ Extracted ${citations.length} citations with ${totalSources} total sources`
       );
+      if (citations.length > 0 && totalSources === 0) {
+        log.warning(
+          "⚠️  Citation buttons found but no sources parsed - citation selectors or label format may have changed"
+        );
+      }
 
-      return { html, citations: formattedCitations };
+      return { html, citations };
     } catch (error) {
       log.error(`Failed to extract AI response: ${error}`);
       throw new CitationExtractionError(`Extraction failed: ${error}`);

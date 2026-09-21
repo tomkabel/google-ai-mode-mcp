@@ -1,172 +1,120 @@
 /**
  * AI Completion Detection Utility
- * 4-Stage Detection Strategy (SVG → aria-label → Text → Timeout)
+ *
+ * Single polling loop over one page snapshot per tick. Completion is accepted
+ * only once the answer region actually holds a non-trivial answer, via:
+ *   1. feedback button visible (fast, appears right after streaming ends)
+ *   2. localized "AI generated" disclaimer text
+ *   3. answer text stopped growing across several consecutive polls
+ *   4. overall timeout - scrape whatever is on the page
+ *
+ * The content gate matters: Google's chrome (nav icons, tool buttons) renders
+ * within ~400ms, long before the answer streams, so any signal that ignores
+ * answer length fires on an empty page and the extractor scrapes nothing.
  */
 
 import type { Page } from "patchright";
 import { log } from "./logger.js";
 import {
   AI_COMPLETION_BUTTON_ARIA,
-  AI_COMPLETION_BUTTON_SVG,
-  AI_COMPLETION_TIMEOUT,
   OVERALL_COMPLETION_TIMEOUT,
   AI_COMPLETION_TEXT_INDICATORS,
 } from "../constants/language-constants.js";
 
 export interface CompletionResult {
   success: boolean;
-  method: "svg" | "aria-label" | "text" | "content" | "timeout" | "none";
+  method: "button" | "text" | "content" | "timeout";
   elapsed: number;
 }
 
+const POLL_MS = 500;
+/** Below this the answer region is chrome/placeholder, not an answer. */
+const MIN_ANSWER_CHARS = 200;
+/** Consecutive unchanged polls before "stopped growing" is believed. */
+const STABLE_POLLS_REQUIRED = 4;
+
+interface PageSnapshot {
+  answerLen: number;
+  buttonVisible: boolean;
+  matchedIndicator: string | null;
+}
+
 /**
- * Wait for AI response to complete using 4-stage detection
- * EXACT 1:1 CLONE of Python skill logic!
- *
- * Method 1 (0-15s): SVG thumbs-up button (100% reliable, language-independent)
- * Method 2 (15-30s): aria-label feedback button (fallback)
- * Method 3 (30-40s): Text indicators (multi-language fallback)
- * Method 4 (40s): Timeout - proceed anyway
+ * Wait for the AI response to finish streaming.
+ * Always resolves (never throws on detection failure) - callers proceed with
+ * whatever is rendered, which is still better than failing the search.
  */
 export async function waitForAiCompletion(page: Page): Promise<CompletionResult> {
   const startTime = Date.now();
-  const overallDeadline = startTime + OVERALL_COMPLETION_TIMEOUT; // 40 seconds total
+  const deadline = startTime + OVERALL_COMPLETION_TIMEOUT;
 
   log.info("⏳ Waiting for AI completion...");
-  log.debug("Starting hybrid completion detection...");
 
-  let aiReady = false;
+  let lastLen: number | null = null;
+  let stablePolls = 0;
 
-  // PRIMARY: Button-based detection (DUAL METHOD - ultra-robust!)
-  // Method 1: SVG-based detection (100% reliable, language-independent!)
-  let remainingTime = overallDeadline - Date.now();
-  if (remainingTime > 0 && !aiReady) {
+  const done = (method: CompletionResult["method"], detail: string) => {
+    const elapsed = Date.now() - startTime;
+    log.success(`✅ AI complete (${method}: ${detail}) (${elapsed}ms)`);
+    return { success: true, method, elapsed };
+  };
+
+  while (Date.now() < deadline) {
+    let snap: PageSnapshot | null = null;
     try {
-      log.debug("Method 1: Attempting SVG thumbs-up icon detection...");
-      const svgSelector = AI_COMPLETION_BUTTON_SVG;
-      await page.waitForSelector(svgSelector, {
-        timeout: Math.min(AI_COMPLETION_TIMEOUT, remainingTime),
-        state: "visible",
-      });
+      snap = await page.evaluate(
+        ([ariaSel, indicators]: [string, string[]]) => {
+          const region = document.querySelector(
+            '[data-container-id="main-col"]'
+          ) as HTMLElement | null;
+          // Fall back to body if Google renames the container, so detection
+          // degrades instead of silently timing out on every search.
+          const answerText = (region ?? document.body)?.innerText ?? "";
 
-      aiReady = true;
-      const elapsed = Date.now() - startTime;
-      log.success("✅ Thumbs UP SVG detected!");
-      log.info(`  ✅ AI complete (Thumbs UP SVG detected!) (${elapsed}ms)`);
-      return { success: true, method: "svg", elapsed };
+          const btn = document.querySelector(ariaSel) as HTMLElement | null;
+          const buttonVisible = !!btn && btn.offsetParent !== null;
 
-    } catch (svgError) {
-      // Method 2: aria-label detection (fallback)
-      log.debug(`Method 1 failed: ${svgError instanceof Error ? svgError.message : String(svgError)}`);
-      remainingTime = overallDeadline - Date.now();
+          const matchedIndicator =
+            (indicators as string[]).find((i) => answerText.includes(i)) ?? null;
 
-      if (remainingTime > 0 && !aiReady) {
-        try {
-          log.debug(`Method 2: Attempting aria-label detection: ${AI_COMPLETION_BUTTON_ARIA}`);
-          await page.waitForSelector(AI_COMPLETION_BUTTON_ARIA, {
-            timeout: Math.min(AI_COMPLETION_TIMEOUT, remainingTime),
-            state: "visible",
-          });
+          return {
+            answerLen: answerText.trim().length,
+            buttonVisible,
+            matchedIndicator,
+          };
+        },
+        [AI_COMPLETION_BUTTON_ARIA, AI_COMPLETION_TEXT_INDICATORS] as [string, string[]]
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/browser has been closed|target closed|page has been closed/i.test(msg)) {
+        throw new Error("Browser closed while waiting for AI content");
+      }
+      // Transient evaluate failure (navigation mid-poll) - try again next tick.
+      log.debug(`Completion poll failed (retrying): ${msg}`);
+    }
 
-          aiReady = true;
-          const elapsed = Date.now() - startTime;
-          log.success("✅ AI complete via aria-label button");
-          log.info(`  ✅ AI complete (button aria-label detected) (${elapsed}ms)`);
-          return { success: true, method: "aria-label", elapsed };
-
-        } catch (ariaError) {
-          // Method 3: Text-based detection (multi-language fallback)
-          log.debug(`Method 2 failed: ${ariaError instanceof Error ? ariaError.message : String(ariaError)}`);
-          log.debug("Both button methods failed, trying text detection...");
-          log.info("⏳ Button not found, trying text detection (multi-lang)...");
-
-          // Text fallback: Poll until overall deadline
-          // Also detects completion via content stability (language-independent,
-          // immune to selector rot): answer is done when its text stops growing.
-          // Stability is confirmed only after the content stays identical across
-          // several consecutive polls, so a brief stream stall can't false-positive.
-          let lastContentLen: number | null = null;
-          let stableCount = 0;
-          const STABLE_POLLS_REQUIRED = 3; // >1 poll => tolerant of transient stalls
-          while (Date.now() < overallDeadline && !aiReady) {
-            try {
-              const { bodyText, contentLen } = await page.evaluate(() => {
-                const mc = document.querySelector(
-                  '[data-container-id="main-col"]'
-                ) as HTMLElement | null;
-                // Prefer the answer region; if Google renames it, fall back to the
-                // page body so stability detection still works instead of silently
-                // timing out. (main-col is the stable, lower-noise signal when present.)
-                const regionText = mc ? (mc.innerText || "") : (document.body.innerText || "");
-                return {
-                  bodyText: document.body.innerText || "",
-                  contentLen: regionText.trim().length,
-                };
-              });
-
-              // Check ALL language indicators
-              for (const indicator of AI_COMPLETION_TEXT_INDICATORS) {
-                if (bodyText.includes(indicator)) {
-                  aiReady = true;
-                  const elapsed = Date.now() - startTime;
-                  log.success(`✅ AI complete via text: "${indicator}"`);
-                  log.info(`  ✅ AI complete (text detected) (${elapsed}ms)`);
-                  return { success: true, method: "text", elapsed };
-                }
-              }
-
-              // Content stability: non-trivial answer that stopped growing.
-              // Require the size to be unchanged across multiple consecutive polls
-              // so a single >1s stream stall doesn't return a truncated answer.
-              if (
-                contentLen > 200 &&
-                lastContentLen !== null &&
-                contentLen === lastContentLen
-              ) {
-                stableCount++;
-              } else {
-                stableCount = 0;
-              }
-              lastContentLen = contentLen;
-
-              if (stableCount >= STABLE_POLLS_REQUIRED) {
-                aiReady = true;
-                const elapsed = Date.now() - startTime;
-                log.success(`✅ AI complete via stable content (${contentLen} chars)`);
-                log.info(`  ✅ AI complete (content stable) (${elapsed}ms)`);
-                return { success: true, method: "content", elapsed };
-              }
-            } catch (error) {
-              // Check for browser closed
-              const errorMsg = error instanceof Error ? error.message : String(error);
-              if (errorMsg.toLowerCase().includes("browser has been closed") || errorMsg.toLowerCase().includes("target closed")) {
-                log.error("Browser closed while waiting for AI content");
-                throw new Error("Browser closed while waiting for AI content");
-              }
-            }
-
-            // Poll every 1 second
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          }
-        }
+    if (snap && snap.answerLen >= MIN_ANSWER_CHARS) {
+      if (snap.buttonVisible) {
+        return done("button", "feedback button visible");
+      }
+      if (snap.matchedIndicator) {
+        return done("text", snap.matchedIndicator);
+      }
+      stablePolls = snap.answerLen === lastLen ? stablePolls + 1 : 0;
+      if (stablePolls >= STABLE_POLLS_REQUIRED) {
+        return done("content", `${snap.answerLen} chars stable`);
       }
     }
-  }
+    if (snap) lastLen = snap.answerLen;
 
-  // FINAL TIMEOUT FALLBACK: After 40 seconds, proceed with whatever is loaded
-  if (!aiReady) {
-    const elapsed = Date.now() - startTime;
-    if (elapsed >= OVERALL_COMPLETION_TIMEOUT) {
-      log.warning("⏱️  40s timeout reached - proceeding with loaded content");
-      log.info(`  ⏱️  Timeout (40s) - scraping loaded content (${elapsed}ms)`);
-      aiReady = true; // Proceed anyway
-    } else {
-      log.warning("AI completion not detected (proceeding anyway)");
-      log.info("  ⚠️  No completion indicator (proceeding)");
-    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 
   const elapsed = Date.now() - startTime;
+  log.warning(
+    `⏱️  No completion signal within ${OVERALL_COMPLETION_TIMEOUT}ms - scraping loaded content`
+  );
   return { success: true, method: "timeout", elapsed };
 }
 

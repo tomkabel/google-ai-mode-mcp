@@ -30,9 +30,9 @@ export interface Source {
  * Citation information with position and source mapping
  */
 export interface Citation {
-  index: number;
+  marker_id: number; // N in "[CITE-N]", assigned in document order
   marker: string; // e.g., "[CITE-1]"
-  source?: Source;
+  sources: Source[];
 }
 
 /**

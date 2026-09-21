@@ -135,10 +135,14 @@ export class ToolHandler {
     // Generate filename
     let filename: string;
     if (customFilename) {
-      // Use custom filename, ensure .md extension
-      filename = customFilename.endsWith(".md")
-        ? customFilename
-        : `${customFilename}.md`;
+      // basename() strips any path: `filename` arrives from the model, which may
+      // be echoing attacker-controlled page text, and "../../../.bashrc" would
+      // otherwise be an arbitrary-file-write primitive.
+      const base = path.basename(customFilename);
+      if (!base || base === "." || base === "..") {
+        throw new Error(`Invalid filename: ${customFilename}`);
+      }
+      filename = base.endsWith(".md") ? base : `${base}.md`;
     } else {
       // Auto-generate from query and timestamp
       const timestamp = new Date()

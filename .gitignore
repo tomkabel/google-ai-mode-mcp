@@ -73,3 +73,8 @@ coverage/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Local tooling
+.serena/
+pnpm-lock.yaml
+pnpm-workspace.yaml
