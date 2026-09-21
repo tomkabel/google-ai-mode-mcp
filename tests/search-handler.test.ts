@@ -23,10 +23,23 @@ class FakePage {
   async close() {
     this.closed = true;
   }
+  context() {
+    return {
+      request: {
+        get: vi.fn(async (url: string) => ({
+          status: () => 302,
+          headers: () => ({ location: "https://publisher.test/" + encodeURIComponent(url) }),
+        })),
+      },
+    };
+  }
 }
 
 vi.mock("../src/browser/browser-manager.js", () => ({
+  isHeadlessBlocked: vi.fn(() => state.headlessBlocked ?? false),
+  markHeadlessBlocked: vi.fn(() => (state.markedBlocked = (state.markedBlocked ?? 0) + 1)),
   BrowserManager: class {
+    isHeadless = vi.fn(() => state.isHeadless ?? true);
     createPage = vi.fn(async () => {
       const p = new FakePage(`page${state.pages.length}`);
       state.pages.push(p);
@@ -88,6 +101,9 @@ beforeEach(async () => {
     citations: [],
     html: undefined,
     completionMethod: "content",
+    headlessBlocked: false,
+    markedBlocked: 0,
+    isHeadless: true,
   });
   vi.resetModules();
   ({ SearchHandler } = await import("../src/search/search-handler.js"));
@@ -168,14 +184,36 @@ describe("cold profile warm-up", () => {
 });
 
 describe("CAPTCHA branch", () => {
-  it("switches to a visible browser and solves, then returns to headless", async () => {
+  it("switches to a visible browser, solves, stays visible and flags headless as blocked", async () => {
     state.captcha = true;
     const result = await new SearchHandler().executeSearch("q");
 
     expect(state.switchedVisible).toBe(1);
-    expect(state.switchedHeadless).toBe(1);
+    expect(state.switchedHeadless).toBe(0);
+    expect(state.markedBlocked).toBe(1);
     expect(result.success).toBe(true);
     expect(state.pages.every((p: FakePage) => p.closed)).toBe(true);
+  });
+
+  it("does not flag headless when the CAPTCHA hit a visible browser", async () => {
+    state.captcha = true;
+    state.isHeadless = false;
+    await new SearchHandler().executeSearch("q");
+    expect(state.markedBlocked).toBe(0);
+  });
+
+  it("goes straight to visible when the headless-blocked flag is set", async () => {
+    state.headlessBlocked = true;
+    const handler = new SearchHandler();
+    await handler.executeSearch("q");
+    expect(handler["browserManager"].getOrCreateContext).toHaveBeenCalledWith(false);
+  });
+
+  it("explicit headless:true option overrides the blocked flag", async () => {
+    state.headlessBlocked = true;
+    const handler = new SearchHandler();
+    await handler.executeSearch("q", { headless: true });
+    expect(handler["browserManager"].getOrCreateContext).toHaveBeenCalledWith(true);
   });
 
   it("restarts the browser and reports failure on a CAPTCHA streak", async () => {
@@ -289,5 +327,67 @@ describe("empty extraction end-to-end", () => {
     const result = await new SearchHandler().executeSearch("q");
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe("EXTRACTION_EMPTY");
+  });
+});
+
+describe("resolveSourceUrls", () => {
+  let resolveSourceUrls: any;
+  beforeEach(async () => {
+    ({ resolveSourceUrls } = await import("../src/search/search-handler.js"));
+  });
+  const goto = (u: string) => `https://www.google.com/goto?url=${encodeURIComponent(u)}`;
+
+  it("replaces /goto redirects with the location header, in place", async () => {
+    const sources = [
+      { title: "A", url: goto("https://a.test/x"), domain: "A" },
+      { title: "B", url: "https://direct.test/", domain: "B" },
+    ];
+    const get = vi.fn(async () => ({ status: () => 302, headers: () => ({ location: "https://a.test/x" }) }));
+    await resolveSourceUrls({ get }, sources);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(sources[0].url).toBe("https://a.test/x");
+    expect(sources[1].url).toBe("https://direct.test/");
+  });
+
+  it("keeps the redirect URL when the request fails or is not a redirect", async () => {
+    const sources = [
+      { title: "A", url: goto("https://a.test"), domain: "A" },
+      { title: "B", url: goto("https://b.test"), domain: "B" },
+    ];
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockResolvedValueOnce({ status: () => 200, headers: () => ({}) });
+    await resolveSourceUrls({ get }, sources);
+    expect(sources[0].url).toBe(goto("https://a.test"));
+    expect(sources[1].url).toBe(goto("https://b.test"));
+  });
+
+  it("caps concurrency at 8", async () => {
+    let inFlight = 0, peak = 0;
+    const get = vi.fn(async () => {
+      inFlight++; peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return { status: () => 302, headers: () => ({ location: "https://x.test/" }) };
+    });
+    const sources = Array.from({ length: 20 }, (_, i) => ({ title: `${i}`, url: goto(`https://s${i}.test`), domain: "" }));
+    await resolveSourceUrls({ get }, sources);
+    expect(peak).toBeLessThanOrEqual(8);
+    expect(sources.every((s) => s.url === "https://x.test/")).toBe(true);
+  });
+});
+
+describe("end-to-end URL resolution", () => {
+  it("returns publisher URLs when resolve_source_urls is on and redirects when off", async () => {
+    const src = () => ({ title: "T", url: "https://www.google.com/goto?url=abc", domain: "T" });
+    state.html = "answer ".repeat(60) + "<code>[CITE-0]</code>";
+    state.citations = [{ marker_id: 0, marker: "[CITE-0]", sources: [src()] }];
+    const on = await new SearchHandler().executeSearch("q");
+    expect(on.sources[0].url).toMatch(/^https:\/\/publisher\.test\//);
+
+    state.citations = [{ marker_id: 0, marker: "[CITE-0]", sources: [src()] }];
+    const off = await new SearchHandler().executeSearch("q", { resolve_source_urls: false });
+    expect(off.sources[0].url).toBe("https://www.google.com/goto?url=abc");
   });
 });

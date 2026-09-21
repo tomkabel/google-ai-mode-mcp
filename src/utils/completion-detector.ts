@@ -44,9 +44,12 @@ interface PageSnapshot {
  * Always resolves (never throws on detection failure) - callers proceed with
  * whatever is rendered, which is still better than failing the search.
  */
-export async function waitForAiCompletion(page: Page): Promise<CompletionResult> {
+export async function waitForAiCompletion(
+  page: Page,
+  timeoutMs: number = OVERALL_COMPLETION_TIMEOUT
+): Promise<CompletionResult> {
   const startTime = Date.now();
-  const deadline = startTime + OVERALL_COMPLETION_TIMEOUT;
+  const deadline = startTime + timeoutMs;
 
   log.info("⏳ Waiting for AI completion...");
 
@@ -113,7 +116,7 @@ export async function waitForAiCompletion(page: Page): Promise<CompletionResult>
 
   const elapsed = Date.now() - startTime;
   log.warning(
-    `⏱️  No completion signal within ${OVERALL_COMPLETION_TIMEOUT}ms - scraping loaded content`
+    `⏱️  No completion signal within ${timeoutMs}ms - scraping loaded content`
   );
   return { success: true, method: "timeout", elapsed };
 }

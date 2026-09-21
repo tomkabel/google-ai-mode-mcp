@@ -83,7 +83,8 @@ export class ResponseParser {
    * Extract AI response HTML (with [CITE-N] markers injected) and its citations.
    */
   async extractAiResponse(
-    page: Page
+    page: Page,
+    timeoutMs: number = CONFIG.responseTimeout
   ): Promise<{ html: string; citations: Citation[] }> {
     try {
       log.info("📚 Injecting Markers & Extracting Sources...");
@@ -91,7 +92,7 @@ export class ResponseParser {
       try {
         await page.waitForSelector(MAIN_CONTAINER, {
           state: "visible",
-          timeout: CONFIG.responseTimeout,
+          timeout: timeoutMs,
         });
       } catch (error) {
         log.error("Main container not found - AI Overview missing?");

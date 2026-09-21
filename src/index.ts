@@ -128,7 +128,7 @@ class GoogleAiSearchMCPServer {
         switch (name) {
           case "search_ai":
             result = await this.toolHandler.handleSearchAi(
-              args as { query: string; headless?: boolean; timeout_ms?: number },
+              args as Parameters<ToolHandler["handleSearchAi"]>[0],
               sendProgress
             );
             break;

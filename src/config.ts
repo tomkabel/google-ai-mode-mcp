@@ -30,6 +30,7 @@ export interface Config {
 
   // Search Settings
   responseTimeout: number; // in milliseconds
+  resolveSourceUrls: boolean; // follow /goto?url= redirects to publisher URLs
 
   // Paths
   dataDir: string;
@@ -53,6 +54,7 @@ const DEFAULTS: Config = {
 
   // Search Settings
   responseTimeout: 30000, // 30 seconds
+  resolveSourceUrls: true,
 
   // Paths
   dataDir: paths.data,
@@ -125,6 +127,10 @@ function applyEnvOverrides(config: Config): Config {
       process.env.GOOGLE_AI_RESPONSE_TIMEOUT,
       config.responseTimeout
     ),
+    resolveSourceUrls: parseBoolean(
+      process.env.GOOGLE_AI_RESOLVE_SOURCE_URLS,
+      config.resolveSourceUrls
+    ),
 
     // Paths - allow override via env
     browserProfileDir:
@@ -163,6 +169,7 @@ export function ensureDirectories(): void {
 export interface BrowserOptions {
   headless?: boolean;
   timeout_ms?: number;
+  resolve_source_urls?: boolean;
 }
 
 /**
@@ -177,6 +184,9 @@ export function applyBrowserOptions(options?: BrowserOptions): Config {
     }
     if (options.timeout_ms !== undefined) {
       config.browserTimeout = options.timeout_ms;
+    }
+    if (options.resolve_source_urls !== undefined) {
+      config.resolveSourceUrls = options.resolve_source_urls;
     }
   }
 

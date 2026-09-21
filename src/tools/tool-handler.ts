@@ -9,8 +9,15 @@ import { SearchHandler, failed } from "../search/search-handler.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
 
+/** Markdown is scraped web text reaching an LLM; fence it so the client can tell data from instructions. */
+export const UNTRUSTED_BEGIN = "<<<UNTRUSTED_WEB_CONTENT>>>";
+export const UNTRUSTED_END = "<<<END_UNTRUSTED_WEB_CONTENT>>>";
+
 export class ToolHandler {
   private searchHandler: SearchHandler;
+  // ponytail: single-flight queue. One browser context, one search at a time;
+  // a CAPTCHA-driven context swap would otherwise close it under a sibling call.
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor() {
     this.searchHandler = new SearchHandler();
@@ -24,13 +31,23 @@ export class ToolHandler {
       query: string;
       headless?: boolean;
       timeout_ms?: number;
+      resolve_source_urls?: boolean;
       save_to_file?: boolean;
       filename?: string;
     },
     sendProgress: ProgressCallback
   ): Promise<SearchResult> {
+    const run = this.chain.then(() => this.handleSearchAiSerial(args, sendProgress));
+    this.chain = run.catch(() => {});
+    return run;
+  }
+
+  private async handleSearchAiSerial(
+    args: Parameters<ToolHandler["handleSearchAi"]>[0],
+    sendProgress: ProgressCallback
+  ): Promise<SearchResult> {
     try {
-      const { query, headless, timeout_ms, save_to_file, filename } = args;
+      const { query, headless, timeout_ms, resolve_source_urls, save_to_file, filename } = args;
 
       // Validate query
       if (!query || query.trim().length === 0) {
@@ -46,6 +63,9 @@ export class ToolHandler {
       }
       if (timeout_ms !== undefined) {
         options.timeout_ms = timeout_ms;
+      }
+      if (resolve_source_urls !== undefined) {
+        options.resolve_source_urls = resolve_source_urls;
       }
 
       // Send progress: Starting search
@@ -71,6 +91,10 @@ export class ToolHandler {
           log.warning(`Failed to save file: ${error}`);
           result.saveError = error instanceof Error ? error.message : String(error);
         }
+      }
+
+      if (result.markdown) {
+        result.markdown = `${UNTRUSTED_BEGIN}\n${result.markdown}\n${UNTRUSTED_END}`;
       }
 
       // Send progress based on result

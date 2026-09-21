@@ -11,11 +11,11 @@
 
 import type { Page } from "patchright";
 import type { SearchResult, SearchOptions, SearchErrorCode, Source } from "../types.js";
-import { BrowserManager } from "../browser/browser-manager.js";
+import { BrowserManager, isHeadlessBlocked, markHeadlessBlocked } from "../browser/browser-manager.js";
 import { CaptchaDetector } from "../browser/captcha-detector.js";
 import { ResponseParser } from "./response-parser.js";
 import { MarkdownConverter } from "./markdown-converter.js";
-import { applyBrowserOptions } from "../config.js";
+import { applyBrowserOptions, type Config } from "../config.js";
 import { log } from "../utils/logger.js";
 import { CaptchaTimeoutError } from "../errors.js";
 import {
@@ -26,6 +26,45 @@ import {
 
 const AI_MODE_UNAVAILABLE_MSG =
   "Google AI Mode is not available in your country or language. Please use a proxy/VPN to access from a supported region (e.g., US, UK, Germany).";
+
+const GOTO_REDIRECT = /^https:\/\/www\.google\.com\/goto\?/;
+const RESOLVE_CONCURRENCY = 8;
+const RESOLVE_TIMEOUT_MS = 5000;
+
+/**
+ * Google serves every citation as an opaque /goto?url=... redirect. One HEAD-ish
+ * GET with maxRedirects: 0 yields the publisher URL in `location` (measured
+ * 59-508 ms, PLAN.md §2.2). Mutates `sources[].url` in place; failures keep the
+ * redirect URL so the caller always has something clickable.
+ */
+export async function resolveSourceUrls(
+  request: { get: (url: string, opts: any) => Promise<{ status(): number; headers(): Record<string, string> }> },
+  sources: Source[]
+): Promise<void> {
+  const todo = sources.filter((s) => GOTO_REDIRECT.test(s.url));
+  if (todo.length === 0) return;
+  const t0 = Date.now();
+  let resolved = 0;
+  // ponytail: fixed-size worker pool, no p-limit dependency for 8 slots
+  const queue = [...todo];
+  const worker = async () => {
+    for (let src = queue.shift(); src; src = queue.shift()) {
+      try {
+        const res = await request.get(src.url, { maxRedirects: 0, timeout: RESOLVE_TIMEOUT_MS });
+        const loc = res.headers()["location"];
+        if (res.status() >= 300 && res.status() < 400 && loc && /^https?:\/\//.test(loc)) {
+          src.url = loc;
+          if (!src.domain || src.domain === "www.google.com") src.domain = new URL(loc).hostname;
+          resolved++;
+        }
+      } catch (e) {
+        log.debug(`URL resolve failed for ${src.url}: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  };
+  await Promise.allSettled(Array.from({ length: Math.min(RESOLVE_CONCURRENCY, todo.length) }, worker));
+  log.info(`🔗 Resolved ${resolved}/${todo.length} redirect URLs in ${Date.now() - t0}ms`);
+}
 
 /** Below this the "answer" is a consent banner, an error page, or nothing. */
 export const MIN_ANSWER_CHARS = 200;
@@ -122,6 +161,10 @@ export class SearchHandler {
 
       // Apply options to config
       const config = applyBrowserOptions(options);
+      if (config.headless && options?.headless === undefined && isHeadlessBlocked()) {
+        log.info("👁️  headless-blocked flag active - going straight to visible browser");
+        config.headless = false;
+      }
 
       // Get browser context
       const context = await this.browserManager.getOrCreateContext(
@@ -176,6 +219,7 @@ export class SearchHandler {
         const captchaState = await this.captchaDetector.detectCaptcha(page);
 
         if (captchaState.detected) {
+          if (this.browserManager.isHeadless()) markHeadlessBlocked();
           // CAPTCHA detected - handle it
           const needsBrowserRestart = this.browserManager.recordCaptcha();
 
@@ -214,17 +258,13 @@ export class SearchHandler {
             }
 
             // Wait for AI response completion (SVG → aria-label → text → timeout)
-            const completion = await waitForAiCompletion(visiblePage);
+            const completion = await waitForAiCompletion(visiblePage, config.browserTimeout);
 
-            // CAPTCHA solved - continue with visible page
-            // Don't switch back to headless yet - keep using visible page for this search
-            const result = await this.performSearch(visiblePage, query, completion);
+            const result = await this.performSearch(visiblePage, query, completion, config);
 
-            // Close page
+            // Close page. Stay visible: headless is now flagged blocked, so the
+            // next search would only relaunch back to visible anyway.
             await visiblePage.close();
-
-            // Switch back to headless mode for next search
-            await this.browserManager.switchToHeadlessMode();
 
             // Reset CAPTCHA counter on success
             this.browserManager.resetCaptchaCounter();
@@ -248,10 +288,10 @@ export class SearchHandler {
           }
 
           // Wait for AI response completion (SVG → aria-label → text → timeout)
-          const completion = await waitForAiCompletion(page);
+          const completion = await waitForAiCompletion(page, config.browserTimeout);
 
           // Proceed with search
-          const result = await this.performSearch(page, query, completion);
+          const result = await this.performSearch(page, query, completion, config);
 
           // Close page
           await page.close();
@@ -281,14 +321,23 @@ export class SearchHandler {
   private async performSearch(
     page: Page,
     query: string,
-    completion: CompletionResult
+    completion: CompletionResult,
+    config: Config
   ): Promise<SearchResult> {
     try {
       // Extract AI response, citations, and sources (all in one - 1:1 clone from skill!)
       log.info("📝 Extracting AI response and citations...");
       const { html, citations } = await this.responseParser.extractAiResponse(
-        page
+        page,
+        config.browserTimeout
       );
+
+      if (config.resolveSourceUrls) {
+        await resolveSourceUrls(
+          page.context().request,
+          citations.flatMap((c) => c.sources)
+        );
+      }
 
       // Convert to markdown (citations → footnotes, returns sources!)
       log.info("📄 Converting to markdown...");

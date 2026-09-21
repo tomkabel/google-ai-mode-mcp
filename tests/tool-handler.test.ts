@@ -179,6 +179,43 @@ describe("ToolHandler", () => {
     });
   });
 
+  describe("single-flight", () => {
+    it("runs concurrent calls one after another", async () => {
+      let inFlight = 0, peak = 0;
+      mockExecuteSearch.mockImplementation(async () => {
+        inFlight++; peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 10));
+        inFlight--;
+        return { success: true, status: "ok", warnings: [], markdown: "x", sources: [], query: "q" };
+      });
+      await Promise.all([
+        handler.handleSearchAi({ query: "a" }, progressCallback),
+        handler.handleSearchAi({ query: "b" }, progressCallback),
+      ]);
+      expect(peak).toBe(1);
+    });
+
+    it("a rejected call does not block the next one", async () => {
+      mockExecuteSearch.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce({
+        success: true, status: "ok", warnings: [], markdown: "x", sources: [], query: "q",
+      });
+      const a = await handler.handleSearchAi({ query: "a" }, progressCallback);
+      const b = await handler.handleSearchAi({ query: "b" }, progressCallback);
+      expect(a.status).toBe("failed");
+      expect(b.status).toBe("ok");
+    });
+  });
+
+  describe("untrusted delimiter", () => {
+    it("wraps returned markdown but not the saved file", async () => {
+      mockExecuteSearch.mockResolvedValue({
+        success: true, status: "ok", warnings: [], markdown: "body", sources: [], query: "q",
+      });
+      const r = await handler.handleSearchAi({ query: "q" }, progressCallback);
+      expect(r.markdown).toBe("<<<UNTRUSTED_WEB_CONTENT>>>\nbody\n<<<END_UNTRUSTED_WEB_CONTENT>>>");
+    });
+  });
+
   describe("saveToFile", () => {
     it("saves markdown to file when save_to_file is true", async () => {
       mockExecuteSearch.mockResolvedValue({

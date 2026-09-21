@@ -65,6 +65,8 @@ export interface CaptchaState {
 export interface SearchOptions {
   headless?: boolean;
   timeout_ms?: number;
+  /** Resolve Google /goto?url= redirects to publisher URLs (default true). */
+  resolve_source_urls?: boolean;
 }
 
 /**

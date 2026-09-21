@@ -204,16 +204,20 @@ Filename pattern: `2026-01-04_15-30-45_typescript_5_4.md`
 
 ## 🔐 First Run: CAPTCHA Handling
 
-On the first query a fresh profile may trigger a CAPTCHA — that's normal.
+**Headless Chrome is CAPTCHA-bait on many residential IPs.** In our probes a
+headless navigation landed on `/sorry` immediately, cold *and* warm profile,
+while the same profile in a visible window succeeded. So the default is:
 
-**If you see a CAPTCHA error:**
-1. Ask your agent: *"Switch to visible mode"* / *"Turn off headless mode"*
-2. The browser opens visibly — solve the CAPTCHA manually
-3. The server detects the solution automatically and continues
-4. Subsequent queries run headless again
+1. First search tries headless (`GOOGLE_AI_HEADLESS=true`).
+2. If that lands on a CAPTCHA, the server writes a `headless-blocked` flag
+   into the profile dir (24 h TTL) and opens a **visible** browser.
+3. Solve the CAPTCHA in that window; the server continues automatically.
+4. Every search for the next 24 h goes straight to the visible browser —
+   no wasted headless attempt. Pass `headless: true` explicitly to force it.
 
-After the first CAPTCHA, searches typically run smoothly thanks to the
-persistent profile (cookies, consent, history).
+If your host has no display, run the server under `xvfb-run` (see
+Installation). The persistent profile (cookies, consent, history) is the single
+most valuable anti-CAPTCHA asset; the server never wipes it.
 
 ---
 
@@ -245,7 +249,8 @@ The server exposes a single tool: **`search_ai`**
 | --- | --- | --- | --- |
 | `query` | ✅ | — | Your search question |
 | `headless` | — | `true` | Run the browser invisibly |
-| `timeout_ms` | — | `120000` | Request timeout in ms |
+| `timeout_ms` | — | `30000` | Navigation / completion / extraction timeout in ms |
+| `resolve_source_urls` | — | `true` | Follow Google `/goto?url=` redirects to publisher URLs (~0.5 s) |
 | `save_to_file` | — | `false` | Save result to a `.md` file |
 | `filename` | — | auto | Custom filename (without `.md`) |
 
@@ -253,7 +258,9 @@ The server exposes a single tool: **`search_ai`**
 ```json
 {
   "success": true,
-  "markdown": "# AI response with citations [1][2]\n\nSources:\n[1] [Title](url)",
+  "status": "ok",
+  "warnings": [],
+  "markdown": "<<<UNTRUSTED_WEB_CONTENT>>>\n# AI response with citations [1][2]\n\nSources:\n[1] Title  \nhttps://example.com\n<<<END_UNTRUSTED_WEB_CONTENT>>>",
   "sources": [
     { "title": "Source Title", "url": "https://example.com", "domain": "example.com" }
   ],
@@ -261,6 +268,16 @@ The server exposes a single tool: **`search_ai`**
   "savedTo": "/path/to/results/file.md"
 }
 ```
+
+| `status` | Meaning |
+| --- | --- |
+| `ok` | Full answer, sources parsed, completion signal seen |
+| `degraded` | Usable, but read `warnings[]`: citations without parsable sources (selector drift) or completion timed out (answer may be truncated) |
+| `failed` | `errorCode` is one of `EMPTY_QUERY`, `EXTRACTION_EMPTY`, `AI_MODE_UNAVAILABLE`, `CAPTCHA_REQUIRED`, `INTERNAL_ERROR`; MCP `isError` is set; `markdown` is empty |
+
+`markdown` is scraped web text. It is wrapped in `<<<UNTRUSTED_WEB_CONTENT>>>`
+delimiters so the calling model can treat it as data, not instructions. The
+saved `.md` file is unwrapped.
 
 **Examples**
 ```javascript
@@ -302,9 +319,11 @@ export GOOGLE_AI_CAPTCHA_COOLDOWN_MS=30000
 | `GOOGLE_AI_BROWSER_TIMEOUT` | `30000` | Browser nav timeout (ms) |
 | `GOOGLE_AI_IDLE_TIMEOUT_MS` | `600000` | Close idle browser after N ms (0 = keep open) |
 | `GOOGLE_AI_CAPTCHA_TIMEOUT` | `300000` | CAPTCHA timeout (ms) |
+| `GOOGLE_AI_CAPTCHA_POLL_INTERVAL` | `3000` | How often to check whether the CAPTCHA was solved (ms) |
 | `GOOGLE_AI_CAPTCHA_MAX_CONSECUTIVE` | `3` | Restart after N CAPTCHAs |
 | `GOOGLE_AI_CAPTCHA_COOLDOWN_MS` | `30000` | Cooldown after restart (ms) |
 | `GOOGLE_AI_RESPONSE_TIMEOUT` | `30000` | Search response timeout (ms) |
+| `GOOGLE_AI_RESOLVE_SOURCE_URLS` | `true` | Follow `/goto?url=` redirects to publisher URLs |
 | `GOOGLE_AI_PROFILE_DIR` | auto | Custom browser profile dir |
 
 ---
@@ -322,7 +341,8 @@ export GOOGLE_AI_CAPTCHA_COOLDOWN_MS=30000
 **Repeated CAPTCHAs**
 - Ask your agent: *"Use visible browser for this search"*
 - Add 10–30s delays between searches
-- The server auto-restarts after 3 consecutive CAPTCHAs (then cools down)
+- After 3 consecutive CAPTCHAs the server closes and relaunches the browser with an exponential, jittered cooldown (30 s, 60 s, 120 s … capped at 4 min). The profile is kept.
+- Delete `<profile dir>/headless-blocked` to let headless try again before the 24 h TTL expires
 
 **Browser won't launch**
 ```bash
@@ -381,12 +401,19 @@ cd google-ai-mode-mcp
 npm install
 npm run build
 
-# Auto-reload dev server
-npm run dev
+# Typecheck + unit tests (no browser)
+npm run check
+
+# Live smoke test against real Google (needs a display or xvfb-run; asserts and exits non-zero)
+npm run smoke -- "your query"
 
 # Continuous build
 npm run watch
 ```
+
+> `npm run dev` (tsx) breaks `page.evaluate` bodies with `__name is not defined`
+> because esbuild's `keepNames` injects a helper the browser never sees. Live
+> runs use `npm run build && node dist/index.js`.
 
 ---
 

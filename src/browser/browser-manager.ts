@@ -7,8 +7,33 @@
 
 import type { BrowserContext, Page } from "patchright";
 import { chromium } from "patchright";
+import fs from "fs";
+import path from "path";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
+
+/** Headless CAPTCHA'd once on this IP/profile: skip headless for a day (S5). */
+const HEADLESS_BLOCKED_TTL_MS = 24 * 60 * 60 * 1000;
+const headlessBlockedFile = () => path.join(CONFIG.browserProfileDir, "headless-blocked");
+
+export function isHeadlessBlocked(): boolean {
+  try {
+    const until = Number(fs.readFileSync(headlessBlockedFile(), "utf-8"));
+    return Number.isFinite(until) && until > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+export function markHeadlessBlocked(): void {
+  try {
+    fs.mkdirSync(CONFIG.browserProfileDir, { recursive: true });
+    fs.writeFileSync(headlessBlockedFile(), String(Date.now() + HEADLESS_BLOCKED_TTL_MS));
+    log.warning("🚫 Headless landed on a CAPTCHA - skipping headless for 24h (headless-blocked flag)");
+  } catch (e) {
+    log.warning(`Could not persist headless-blocked flag: ${e}`);
+  }
+}
 
 // Browser arguments for stealth mode
 const BROWSER_ARGS = [
@@ -27,6 +52,7 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
   private currentHeadlessMode: boolean | null = null;
   private consecutiveCaptchas: number = 0;
+  private restarts = 0;
   private idleTimer: NodeJS.Timeout | null = null;
   private openPages = 0;
   // Serializes launch/recreate so concurrent search_ai calls can't both
@@ -331,11 +357,12 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
     await this.serialize(async () => {
       await this.closeContext();
 
-      // Wait for cooldown
-      log.info(`⏸️  Cooldown: ${CONFIG.captchaCooldownMs}ms...`);
-      await new Promise((resolve) =>
-        setTimeout(resolve, CONFIG.captchaCooldownMs)
-      );
+      // Exponential backoff with jitter, capped at 8x the base cooldown.
+      const backoff = Math.min(CONFIG.captchaCooldownMs * 2 ** this.restarts, CONFIG.captchaCooldownMs * 8);
+      const cooldown = Math.round(backoff * (0.75 + Math.random() * 0.5));
+      this.restarts++;
+      log.info(`⏸️  Cooldown: ${cooldown}ms (restart #${this.restarts})...`);
+      await new Promise((resolve) => setTimeout(resolve, cooldown));
 
       await this.recreateContext();
     });
@@ -371,6 +398,7 @@ Alternative: Use headless mode (set headless: true in tool parameters)`);
       log.success(`✅ Resetting CAPTCHA counter (was ${this.consecutiveCaptchas})`);
       this.consecutiveCaptchas = 0;
     }
+    this.restarts = 0;
   }
 
   /**
