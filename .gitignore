@@ -27,9 +27,8 @@ chrome_profile/
 browser_state/
 
 # Results (saved markdown files)
+# Scoped to results/ - a blanket *.md also swallowed PLAN.md, CHANGELOG.md, docs/.
 results/
-*.md
-!README.md
 
 # IDE
 .vscode/
