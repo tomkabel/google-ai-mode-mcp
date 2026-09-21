@@ -24,22 +24,21 @@
 
 ## ✨ What's New in This Fork
 
-This fork hardens the original server for **reliability under stealth** and
+This fork hardens the original server for **reliability** and
 extends its reach to **more languages**. Every change is battle-tested and
 backward-compatible — drop-in for existing setups.
 
 | Enhancement | What it fixes | Impact |
 | --- | --- | --- |
-| 🕵️ **Adaptive stealth fingerprint** | The old UA was hardcoded to a Chrome build that drifted from the real browser, a dead-giveaway bot tell. | UA is now **probed from the actually installed Chrome** (once, cached), so `navigator.platform`, `buildID`, and UA always agree. Fewer CAPTCHAs. |
+| 🕵️ **Matching user agent** | The old UA was hardcoded to a Chrome build that drifted from the real browser, a dead-giveaway bot tell. | UA is now **probed from the actually installed Chrome** (once, cached), so `navigator.platform`, `buildID`, and UA always agree. Fewer CAPTCHAs. |
 | 🧊 **Cold-profile warm-up** | A fresh profile deep-linking straight to `/search?udm=50` looked like a bot (no cookies/history). | Lands on `google.com` first to set consent/session cookies, then searches. **Best-effort & guarded** — a warm-up failure can never abort your search. |
 | 🎯 **Bulletproof completion detection** | A transient >1s stream stall could be mistaken for "done", returning a truncated answer. | 4-stage detection (SVG → aria-label → multilingual text → **content-stability**) now requires **3 consecutive stable polls** before declaring completion. No more false positives, no more half answers. |
 | 🌐 **Estonian (`et`) support** | Estonian locales had no citation/completion/availability handling. | Full `et` coverage across citation selectors, completion indicators, cutoff markers, availability checks, and CAPTCHA text. |
-| 🔁 **Zero-source retry** | When the answer rendered but citation extraction hit selector rot, you got a citation-less result. | One **bounded retry** with an explicit "MUST provide 3-5 sources" nudge instead of silent citation loss. |
-| 🧹 **Query-leak fix** | The retry nudge leaked into `result.query`. | The user's **real query** is always reflected in the result — the retry suffix stays internal. |
+| 🚨 **Fail loud** | Every failure path returned `success: true` with an empty or sourceless answer, so the calling LLM hallucinated over the gap. | Results carry `status: "ok" \| "degraded" \| "failed"`, an `errorCode` and `warnings[]`. Under 200 chars of answer is `failed` + MCP `isError`; citations without parsable sources or a timed-out completion are `degraded` with a warning you can branch on. |
 | 🆕 **Current Google icon selector** | The completion "thumbs-up" SVG selector had gone stale. | Updated to the current Material icon `viewBox="0 0 24 24"`; removed the overly-generic Estonian text indicator that caused premature completion. |
 
 **Net effect:** more answers complete correctly on the first try, fewer CAPTCHAs,
-cleaner citations, and a wider language net — all while staying fully stealthy.
+cleaner citations, a wider language net, and failures you can actually see.
 
 ---
 
@@ -214,7 +213,7 @@ On the first query a fresh profile may trigger a CAPTCHA — that's normal.
 4. Subsequent queries run headless again
 
 After the first CAPTCHA, searches typically run smoothly thanks to the
-persistent profile and stealth techniques.
+persistent profile (cookies, consent, history).
 
 ---
 
@@ -223,13 +222,13 @@ persistent profile and stealth techniques.
 ```
 Your agent asks a question
         ↓
-Server launches a stealth browser (adaptive Chrome UA)
+Server launches Patchright Chrome with a persistent profile
         ↓
 Google AI Mode searches & synthesizes dozens of sources
         ↓
 Server waits for completion (4-stage, content-stable detection)
         ↓
-Extracts the AI answer + citations (zero-source retry on miss)
+Extracts the AI answer + citations (missing sources → status "degraded")
         ↓
 Converts to clean Markdown with [1][2][3] references
         ↓
@@ -285,7 +284,6 @@ Works out of the box. Advanced users can tune behaviour via environment variable
 ```bash
 # Browser
 export GOOGLE_AI_HEADLESS=true            # Run browser invisibly
-export GOOGLE_AI_STEALTH_ENABLED=true     # Anti-detection techniques
 export GOOGLE_AI_IDLE_TIMEOUT_MS=600000   # Close idle browser after 10 min (0 = keep open)
 
 # Timeouts
@@ -303,15 +301,10 @@ export GOOGLE_AI_CAPTCHA_COOLDOWN_MS=30000
 | `GOOGLE_AI_HEADLESS` | `true` | Invisible browser |
 | `GOOGLE_AI_BROWSER_TIMEOUT` | `30000` | Browser nav timeout (ms) |
 | `GOOGLE_AI_IDLE_TIMEOUT_MS` | `600000` | Close idle browser after N ms (0 = keep open) |
-| `GOOGLE_AI_STEALTH_ENABLED` | `true` | Enable stealth mode |
-| `GOOGLE_AI_STEALTH_RANDOM_DELAYS` | `true` | Random delays between actions |
-| `GOOGLE_AI_STEALTH_HUMAN_TYPING` | `true` | Human-like typing |
-| `GOOGLE_AI_STEALTH_MOUSE_MOVEMENTS` | `true` | Human-like mouse movements |
 | `GOOGLE_AI_CAPTCHA_TIMEOUT` | `300000` | CAPTCHA timeout (ms) |
 | `GOOGLE_AI_CAPTCHA_MAX_CONSECUTIVE` | `3` | Restart after N CAPTCHAs |
 | `GOOGLE_AI_CAPTCHA_COOLDOWN_MS` | `30000` | Cooldown after restart (ms) |
 | `GOOGLE_AI_RESPONSE_TIMEOUT` | `30000` | Search response timeout (ms) |
-| `GOOGLE_AI_CITATION_TIMEOUT` | `5000` | Citation extraction timeout (ms) |
 | `GOOGLE_AI_PROFILE_DIR` | auto | Custom browser profile dir |
 
 ---
@@ -425,4 +418,4 @@ pull request — both are welcome.
 
 ---
 
-<p align="center"><sub>Built with stealth, stability, and a healthy respect for Google's rate limits.</sub></p>
+<p align="center"><sub>Built with stability and a healthy respect for Google's rate limits.</sub></p>

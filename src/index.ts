@@ -10,7 +10,7 @@
  * - Automatic CAPTCHA detection and handling
  * - Markdown output with inline citations
  * - Stateless design (no authentication or sessions)
- * - Stealth mode with Patchright
+ * - Patchright with a persistent profile
  *
  * Usage:
  *   npx google-ai-mode-mcp
@@ -19,7 +19,6 @@
  * Environment Variables:
  *   GOOGLE_AI_HEADLESS - Run browser in headless mode (default: true)
  *   GOOGLE_AI_CAPTCHA_TIMEOUT - CAPTCHA timeout in ms (default: 300000)
- *   GOOGLE_AI_STEALTH_ENABLED - Enable stealth mode (default: true)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -37,8 +36,11 @@ import {
   GOOGLE_AI_SEARCH_PROMPT,
   GOOGLE_AI_SEARCH_PROMPT_TEMPLATE,
 } from "./tools/search-prompt.js";
-import { CONFIG } from "./config.js";
+import { CONFIG, ensureDirectories } from "./config.js";
 import { log } from "./utils/logger.js";
+import { createRequire } from "module";
+
+const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 /**
  * Main MCP Server Class
@@ -52,14 +54,13 @@ class GoogleAiSearchMCPServer {
     this.server = new Server(
       {
         name: "google-ai-mode-mcp",
-        version: "1.0.3",
+        version: VERSION,
       },
       {
         capabilities: {
           tools: {},
           prompts: {},
           completions: {}, // Required for completion/complete support
-          logging: {},
         },
       }
     );
@@ -72,7 +73,7 @@ class GoogleAiSearchMCPServer {
     this.setupShutdownHandlers();
 
     log.info("🚀 Google AI Search Mode MCP Server initialized");
-    log.info(`  Version: 1.0.3`);
+    log.info(`  Version: ${VERSION}`);
     log.info(`  Node: ${process.version}`);
     log.info(`  Platform: ${process.platform}`);
   }
@@ -154,6 +155,7 @@ class GoogleAiSearchMCPServer {
 
         // Return result
         return {
+          isError: result.status === "failed",
           content: [
             {
               type: "text",
@@ -290,9 +292,10 @@ class GoogleAiSearchMCPServer {
     log.info(`  Data Dir: ${CONFIG.dataDir}`);
     log.info(`  Browser Profile: ${CONFIG.browserProfileDir}`);
     log.info(`  Headless: ${CONFIG.headless}`);
-    log.info(`  Stealth: ${CONFIG.stealthEnabled}`);
     log.info(`  CAPTCHA Timeout: ${CONFIG.captchaTimeout / 1000}s`);
     log.info("");
+
+    ensureDirectories();
 
     // Create stdio transport
     const transport = new StdioServerTransport();
@@ -319,7 +322,7 @@ async function main() {
   // Print banner
   console.error("╔══════════════════════════════════════════════════════════╗");
   console.error("║                                                          ║");
-  console.error("║        Google AI Search Mode MCP Server v1.0.3          ║");
+  console.error(`║        Google AI Search Mode MCP Server v${VERSION.padEnd(16)}║`);
   console.error("║                                                          ║");
   console.error("║   Search Google AI Mode with CAPTCHA handling via MCP   ║");
   console.error("║                                                          ║");

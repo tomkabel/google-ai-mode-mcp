@@ -10,11 +10,12 @@ export const SEARCH_AI_TOOL: Tool = {
 
 Returns markdown-formatted AI response with inline citations [1][2] and source list.
 
+Result has \`status\`: "ok" (full answer), "degraded" (usable, but read \`warnings\` - sources may be missing or the answer truncated) or "failed" (\`errorCode\` set, do not use \`markdown\`).
+
 Features:
-- Automatic CAPTCHA detection and handling
+- Automatic CAPTCHA detection and handling (falls back to a visible browser)
 - Source extraction with citations
 - Clean markdown formatting
-- Stealth mode for anti-detection
 - Optional file saving with timestamp and sanitized filename
 
 Note: If CAPTCHA is detected, you will be prompted to solve it in a visible browser window.`,
@@ -34,7 +35,7 @@ Note: If CAPTCHA is detected, you will be prompted to solve it in a visible brow
       timeout_ms: {
         type: "number",
         description:
-          "Optional: Timeout in milliseconds for the search (default: 120000 = 2 minutes)",
+          "Optional: Browser navigation timeout in milliseconds (default: 30000)",
       },
       save_to_file: {
         type: "boolean",

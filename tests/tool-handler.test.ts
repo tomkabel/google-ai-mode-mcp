@@ -3,8 +3,10 @@ import { ToolHandler } from "../src/tools/tool-handler.js";
 import type { SearchResult, ProgressCallback } from "../src/types.js";
 
 // Mock the SearchHandler so we don't launch a real browser
-vi.mock("../src/search/search-handler.js", () => {
+vi.mock("../src/search/search-handler.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/search/search-handler.js")>();
   return {
+    failed: actual.failed,
     SearchHandler: class {
       executeSearch = vi.fn();
       cleanup = vi.fn().mockResolvedValue(undefined);
@@ -33,6 +35,8 @@ describe("ToolHandler", () => {
         progressCallback
       );
       expect(result.success).toBe(false);
+      expect(result.status).toBe("failed");
+      expect(result.errorCode).toBe("EMPTY_QUERY");
       expect(result.error).toContain("empty");
       expect(mockExecuteSearch).not.toHaveBeenCalled();
     });
@@ -96,62 +100,20 @@ describe("ToolHandler", () => {
       expect(mockExecuteSearch).toHaveBeenCalledWith("test", { timeout_ms: 60000 });
     });
 
-    it("retries when zero sources but has markdown", async () => {
-      mockExecuteSearch
-        .mockResolvedValueOnce({
-          success: true,
-          markdown: "Some answer text",
-          sources: [],
-          query: "test query",
-        })
-        .mockResolvedValueOnce({
-          success: true,
-          markdown: "Better answer",
-          sources: [{ title: "S1", url: "http://s1.com", domain: "s1.com" }],
-          query: "test query MUST provide 3-5 sources",
-        });
-
-      const result = await handler.handleSearchAi(
-        { query: "test query" },
-        progressCallback
-      );
-
-      expect(mockExecuteSearch).toHaveBeenCalledTimes(2);
-      // Second call should include the retry nudge
-      expect(mockExecuteSearch).toHaveBeenNthCalledWith(
-        2,
-        "test query MUST provide 3-5 sources",
-        {}
-      );
-      // Result should have the user's original query, not the retry query
-      expect(result.query).toBe("test query");
-      expect(result.sources.length).toBe(1);
-    });
-
-    it("does NOT retry when sources exist", async () => {
+    it("never re-runs the search when sources are missing (degraded, not retried)", async () => {
       mockExecuteSearch.mockResolvedValue({
         success: true,
-        markdown: "Answer",
-        sources: [{ title: "S", url: "http://s.com", domain: "s.com" }],
-        query: "test",
-      });
-
-      await handler.handleSearchAi({ query: "test" }, progressCallback);
-
-      expect(mockExecuteSearch).toHaveBeenCalledTimes(1);
-    });
-
-    it("does NOT retry when markdown is empty", async () => {
-      mockExecuteSearch.mockResolvedValue({
-        success: true,
-        markdown: "",
+        status: "degraded",
+        warnings: ["citation labels did not parse"],
+        markdown: "Some answer text",
         sources: [],
-        query: "test",
+        query: "test query",
       });
 
-      await handler.handleSearchAi({ query: "test" }, progressCallback);
+      const result = await handler.handleSearchAi({ query: "test query" }, progressCallback);
 
       expect(mockExecuteSearch).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe("degraded");
     });
 
     it("handles search failure gracefully", async () => {

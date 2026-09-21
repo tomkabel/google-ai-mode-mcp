@@ -5,13 +5,26 @@
 /**
  * Search result returned by the MCP tool
  */
+export type SearchStatus = "ok" | "degraded" | "failed";
+
+export type SearchErrorCode =
+  | "EMPTY_QUERY"
+  | "EXTRACTION_EMPTY"
+  | "AI_MODE_UNAVAILABLE"
+  | "CAPTCHA_REQUIRED"
+  | "INTERNAL_ERROR";
+
 export interface SearchResult {
+  /** `status !== "failed"`. Kept for backwards compatibility. */
   success: boolean;
+  /** ok = full answer; degraded = usable but check `warnings`; failed = do not trust `markdown`. */
+  status: SearchStatus;
+  errorCode?: SearchErrorCode;
+  warnings: string[];
   markdown: string;
   sources: Source[];
   query: string;
   captchaRequired?: boolean;
-  captchaSolved?: boolean;
   error?: string;
   savedTo?: string; // Path to saved file (if save_to_file was true)
   saveError?: string; // Error message if saving failed

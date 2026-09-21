@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { SearchResult, SearchOptions, ProgressCallback } from "../types.js";
-import { SearchHandler } from "../search/search-handler.js";
+import { SearchHandler, failed } from "../search/search-handler.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
 
@@ -34,13 +34,7 @@ export class ToolHandler {
 
       // Validate query
       if (!query || query.trim().length === 0) {
-        return {
-          success: false,
-          markdown: "",
-          sources: [],
-          query: "",
-          error: "Query cannot be empty",
-        };
+        return failed("", "EMPTY_QUERY", "Query cannot be empty");
       }
 
       log.info(`🔍 Tool call: search_ai("${query}")`);
@@ -58,19 +52,9 @@ export class ToolHandler {
       await sendProgress("Navigating to Google AI Search...");
 
       // Execute search
-      let result = await this.searchHandler.executeSearch(query, options);
-
-      // Zero-source retry: answer rendered but no citations extracted (selector rot,
-      // flaky sidebar). One bounded retry with an explicit source request.
-      if (result.success && result.sources.length === 0 && result.markdown.trim().length > 0) {
-        const retryQuery = `${query} MUST provide 3-5 sources`;
-        log.warning(`⚠️  Zero sources extracted — retrying with explicit source request`);
-        await sendProgress("No sources found — retrying with explicit source requirement...");
-        result = await this.searchHandler.executeSearch(retryQuery, options);
-        // The retry query is only a nudge for citation extraction; the result must
-        // still reflect the user's real query (don't leak the retry suffix).
-        result.query = query;
-      }
+      // No zero-source re-search: missing sources is selector drift, which a
+      // second identical run cannot fix. It surfaces as status "degraded" instead.
+      const result = await this.searchHandler.executeSearch(query, options);
 
       // Save to file if requested and search was successful
       if (save_to_file && result.success && result.markdown) {
@@ -91,7 +75,7 @@ export class ToolHandler {
 
       // Send progress based on result
       if (result.success) {
-        await sendProgress("Search completed successfully!", 100, 100);
+        await sendProgress(`Search completed (${result.status})`, 100, 100);
       } else if (result.captchaRequired) {
         await sendProgress(
           "CAPTCHA detected - please solve in visible browser"
@@ -104,13 +88,7 @@ export class ToolHandler {
     } catch (error) {
       log.error(`Tool handler error: ${error}`);
 
-      return {
-        success: false,
-        markdown: "",
-        sources: [],
-        query: args.query || "",
-        error: error instanceof Error ? error.message : String(error),
-      };
+      return failed(args.query || "", "INTERNAL_ERROR", error instanceof Error ? error.message : String(error));
     }
   }
 

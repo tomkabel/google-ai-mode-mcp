@@ -20,18 +20,7 @@ export interface Config {
   // Browser Settings
   headless: boolean;
   browserTimeout: number;
-  viewport: { width: number; height: number };
   idleTimeoutMs: number; // close idle browser after N ms (0 = keep open)
-
-  // Stealth Settings
-  stealthEnabled: boolean;
-  stealthRandomDelays: boolean;
-  stealthHumanTyping: boolean;
-  stealthMouseMovements: boolean;
-  typingWpmMin: number;
-  typingWpmMax: number;
-  minDelayMs: number;
-  maxDelayMs: number;
 
   // CAPTCHA Settings
   captchaTimeout: number; // in milliseconds
@@ -41,21 +30,11 @@ export interface Config {
 
   // Search Settings
   responseTimeout: number; // in milliseconds
-  citationTimeout: number; // in milliseconds
 
   // Paths
   dataDir: string;
   browserProfileDir: string;
 }
-
-// Common viewport sizes for anti-detection
-export const VIEWPORT_SIZES = [
-  { width: 1920, height: 1080 },
-  { width: 1366, height: 768 },
-  { width: 1536, height: 864 },
-  { width: 1440, height: 900 },
-  { width: 2560, height: 1440 },
-];
 
 /**
  * Default Configuration (works out of the box!)
@@ -64,18 +43,7 @@ const DEFAULTS: Config = {
   // Browser Settings
   headless: true,
   browserTimeout: 30000, // 30 seconds
-  viewport: { width: 1920, height: 1080 },
   idleTimeoutMs: 600000, // close idle browser after 10 min (0 = keep open)
-
-  // Stealth Settings
-  stealthEnabled: true,
-  stealthRandomDelays: true,
-  stealthHumanTyping: true,
-  stealthMouseMovements: true,
-  typingWpmMin: 160,
-  typingWpmMax: 240,
-  minDelayMs: 100,
-  maxDelayMs: 400,
 
   // CAPTCHA Settings
   captchaTimeout: 300000, // 5 minutes
@@ -85,7 +53,6 @@ const DEFAULTS: Config = {
 
   // Search Settings
   responseTimeout: 30000, // 30 seconds
-  citationTimeout: 5000, // 5 seconds per citation
 
   // Paths
   dataDir: paths.data,
@@ -135,40 +102,6 @@ function applyEnvOverrides(config: Config): Config {
       config.idleTimeoutMs
     ),
 
-    // Stealth Settings
-    stealthEnabled: parseBoolean(
-      process.env.GOOGLE_AI_STEALTH_ENABLED,
-      config.stealthEnabled
-    ),
-    stealthRandomDelays: parseBoolean(
-      process.env.GOOGLE_AI_STEALTH_RANDOM_DELAYS,
-      config.stealthRandomDelays
-    ),
-    stealthHumanTyping: parseBoolean(
-      process.env.GOOGLE_AI_STEALTH_HUMAN_TYPING,
-      config.stealthHumanTyping
-    ),
-    stealthMouseMovements: parseBoolean(
-      process.env.GOOGLE_AI_STEALTH_MOUSE_MOVEMENTS,
-      config.stealthMouseMovements
-    ),
-    typingWpmMin: parseInteger(
-      process.env.GOOGLE_AI_TYPING_WPM_MIN,
-      config.typingWpmMin
-    ),
-    typingWpmMax: parseInteger(
-      process.env.GOOGLE_AI_TYPING_WPM_MAX,
-      config.typingWpmMax
-    ),
-    minDelayMs: parseInteger(
-      process.env.GOOGLE_AI_MIN_DELAY_MS,
-      config.minDelayMs
-    ),
-    maxDelayMs: parseInteger(
-      process.env.GOOGLE_AI_MAX_DELAY_MS,
-      config.maxDelayMs
-    ),
-
     // CAPTCHA Settings
     captchaTimeout: parseInteger(
       process.env.GOOGLE_AI_CAPTCHA_TIMEOUT,
@@ -191,10 +124,6 @@ function applyEnvOverrides(config: Config): Config {
     responseTimeout: parseInteger(
       process.env.GOOGLE_AI_RESPONSE_TIMEOUT,
       config.responseTimeout
-    ),
-    citationTimeout: parseInteger(
-      process.env.GOOGLE_AI_CITATION_TIMEOUT,
-      config.citationTimeout
     ),
 
     // Paths - allow override via env
@@ -253,6 +182,3 @@ export function applyBrowserOptions(options?: BrowserOptions): Config {
 
   return config;
 }
-
-// Create directories on import
-ensureDirectories();

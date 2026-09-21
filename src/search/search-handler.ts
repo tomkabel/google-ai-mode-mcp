@@ -9,7 +9,8 @@
  * 5. Return result
  */
 
-import type { SearchResult, SearchOptions } from "../types.js";
+import type { Page } from "patchright";
+import type { SearchResult, SearchOptions, SearchErrorCode, Source } from "../types.js";
 import { BrowserManager } from "../browser/browser-manager.js";
 import { CaptchaDetector } from "../browser/captcha-detector.js";
 import { ResponseParser } from "./response-parser.js";
@@ -17,7 +18,68 @@ import { MarkdownConverter } from "./markdown-converter.js";
 import { applyBrowserOptions } from "../config.js";
 import { log } from "../utils/logger.js";
 import { CaptchaTimeoutError } from "../errors.js";
-import { waitForAiCompletion, checkAiModeAvailability } from "../utils/completion-detector.js";
+import {
+  waitForAiCompletion,
+  checkAiModeAvailability,
+  type CompletionResult,
+} from "../utils/completion-detector.js";
+
+const AI_MODE_UNAVAILABLE_MSG =
+  "Google AI Mode is not available in your country or language. Please use a proxy/VPN to access from a supported region (e.g., US, UK, Germany).";
+
+/** Below this the "answer" is a consent banner, an error page, or nothing. */
+export const MIN_ANSWER_CHARS = 200;
+
+export function failed(query: string, errorCode: SearchErrorCode, error: string): SearchResult {
+  return {
+    success: false,
+    status: "failed",
+    errorCode,
+    error,
+    warnings: [],
+    markdown: "",
+    sources: [],
+    query,
+    ...(errorCode === "CAPTCHA_REQUIRED" && { captchaRequired: true }),
+  };
+}
+
+/**
+ * The single place that decides ok / degraded / failed for an extracted answer.
+ * Rules (PLAN.md S1): short markdown → failed; citations without sources or a
+ * timed-out completion → degraded with a warning the caller can branch on.
+ */
+export function classifyResult(input: {
+  query: string;
+  markdown: string;
+  sources: Source[];
+  citationCount: number;
+  completionMethod: CompletionResult["method"];
+}): SearchResult {
+  const { query, markdown, sources, citationCount, completionMethod } = input;
+  if (markdown.trim().length < MIN_ANSWER_CHARS) {
+    return failed(
+      query,
+      "EXTRACTION_EMPTY",
+      `Extracted only ${markdown.trim().length} chars of answer - page layout may have changed or the answer did not render`
+    );
+  }
+  const warnings: string[] = [];
+  if (citationCount > 0 && sources.length === 0) {
+    warnings.push("citation labels did not parse — selector/format drift; sources list is empty");
+  }
+  if (completionMethod === "timeout") {
+    warnings.push("completion signal never fired — answer may be truncated");
+  }
+  return {
+    success: true,
+    status: warnings.length ? "degraded" : "ok",
+    warnings,
+    markdown,
+    sources,
+    query,
+  };
+}
 
 export class SearchHandler {
   private browserManager: BrowserManager;
@@ -123,14 +185,7 @@ export class SearchHandler {
             await this.browserManager.restartBrowser("max consecutive CAPTCHAs");
 
             // Return error indicating browser restart
-            return {
-              success: false,
-              markdown: "",
-              sources: [],
-              query,
-              captchaRequired: true,
-              error: "Too many consecutive CAPTCHAs - browser restarted. Please try again.",
-            };
+            return failed(query, "CAPTCHA_REQUIRED", "Too many consecutive CAPTCHAs - browser restarted. Please try again.");
           }
 
           // Switch to visible mode
@@ -155,21 +210,15 @@ export class SearchHandler {
             const aiModeAvailable = await checkAiModeAvailability(visiblePage);
             if (!aiModeAvailable) {
               await visiblePage.close();
-              return {
-                success: false,
-                markdown: "",
-                sources: [],
-                query,
-                error: "Google AI Mode is not available in your country or language. Please use a proxy/VPN to access from a supported region (e.g., US, UK, Germany).",
-              };
+              return failed(query, "AI_MODE_UNAVAILABLE", AI_MODE_UNAVAILABLE_MSG);
             }
 
             // Wait for AI response completion (SVG → aria-label → text → timeout)
-            await waitForAiCompletion(visiblePage);
+            const completion = await waitForAiCompletion(visiblePage);
 
             // CAPTCHA solved - continue with visible page
             // Don't switch back to headless yet - keep using visible page for this search
-            const result = await this.performSearch(visiblePage, query);
+            const result = await this.performSearch(visiblePage, query, completion);
 
             // Close page
             await visiblePage.close();
@@ -185,14 +234,7 @@ export class SearchHandler {
             if (error instanceof CaptchaTimeoutError) {
               await visiblePage.close().catch(() => {});
 
-              return {
-                success: false,
-                markdown: "",
-                sources: [],
-                query,
-                captchaRequired: true,
-                error: "CAPTCHA timeout - please solve CAPTCHA manually",
-              };
+              return failed(query, "CAPTCHA_REQUIRED", "CAPTCHA timeout - please solve CAPTCHA manually");
             }
 
             throw error;
@@ -202,20 +244,14 @@ export class SearchHandler {
           const aiModeAvailable = await checkAiModeAvailability(page);
           if (!aiModeAvailable) {
             await page.close();
-            return {
-              success: false,
-              markdown: "",
-              sources: [],
-              query,
-              error: "Google AI Mode is not available in your country or language. Please use a proxy/VPN to access from a supported region (e.g., US, UK, Germany).",
-            };
+            return failed(query, "AI_MODE_UNAVAILABLE", AI_MODE_UNAVAILABLE_MSG);
           }
 
           // Wait for AI response completion (SVG → aria-label → text → timeout)
-          await waitForAiCompletion(page);
+          const completion = await waitForAiCompletion(page);
 
           // Proceed with search
-          const result = await this.performSearch(page, query);
+          const result = await this.performSearch(page, query, completion);
 
           // Close page
           await page.close();
@@ -235,13 +271,7 @@ export class SearchHandler {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       log.error(`❌ Search failed after ${elapsed}s: ${error}`);
 
-      return {
-        success: false,
-        markdown: "",
-        sources: [],
-        query,
-        error: error instanceof Error ? error.message : String(error),
-      };
+      return failed(query, "INTERNAL_ERROR", error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -249,8 +279,9 @@ export class SearchHandler {
    * Perform the actual search (after CAPTCHA is handled)
    */
   private async performSearch(
-    page: any,
-    query: string
+    page: Page,
+    query: string,
+    completion: CompletionResult
   ): Promise<SearchResult> {
     try {
       // Extract AI response, citations, and sources (all in one - 1:1 clone from skill!)
@@ -267,19 +298,23 @@ export class SearchHandler {
         [] // Empty array, converter gets sources from citations
       );
 
+      const result = classifyResult({
+        query,
+        markdown,
+        sources: embeddedSources,
+        citationCount: citations.length,
+        completionMethod: completion.method,
+      });
+
       log.info("=".repeat(80));
-      log.success("✅ Search completed successfully!");
+      log.info(`${result.status === "failed" ? "❌" : "✅"} Search ${result.status}`);
       log.info(`   Citations: ${citations.length}`);
       log.info(`   Sources: ${embeddedSources.length}`);
       log.info(`   Markdown length: ${markdown.length} chars`);
+      for (const w of result.warnings) log.warning(`   ⚠️  ${w}`);
       log.info("=".repeat(80));
 
-      return {
-        success: true,
-        markdown,
-        sources: embeddedSources, // Use sources from markdown converter!
-        query,
-      };
+      return result;
     } catch (error) {
       log.error(`Search execution failed: ${error}`);
       throw error;

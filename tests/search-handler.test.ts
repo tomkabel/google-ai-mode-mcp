@@ -58,13 +58,13 @@ vi.mock("../src/search/response-parser.js", () => ({
   ResponseParser: class {
     extractAiResponse = vi.fn(async () => {
       if (state.extractError) throw state.extractError;
-      return { html: "<p>answer</p>", citations: state.citations ?? [] };
+      return { html: `<p>${state.html ?? "answer ".repeat(60)}</p>`, citations: state.citations ?? [] };
     });
   },
 }));
 
 vi.mock("../src/utils/completion-detector.js", () => ({
-  waitForAiCompletion: vi.fn(async () => ({ success: true, method: "content", elapsed: 1 })),
+  waitForAiCompletion: vi.fn(async () => ({ success: true, method: state.completionMethod ?? "content", elapsed: 1 })),
   checkAiModeAvailability: vi.fn(async () => state.aiModeAvailable ?? true),
 }));
 
@@ -86,6 +86,8 @@ beforeEach(async () => {
     extractError: undefined,
     captchaError: undefined,
     citations: [],
+    html: undefined,
+    completionMethod: "content",
   });
   vi.resetModules();
   ({ SearchHandler } = await import("../src/search/search-handler.js"));
@@ -242,5 +244,50 @@ describe("failure paths", () => {
     state.extractError = new Error("boom");
     await new SearchHandler().executeSearch("q");
     expect(state.counterReset).toBe(0);
+  });
+});
+
+describe("classifyResult (S1 rules)", () => {
+  let classifyResult: any;
+  beforeEach(async () => {
+    ({ classifyResult } = await import("../src/search/search-handler.js"));
+  });
+  const src = { title: "T", url: "https://x.test", domain: "x.test" };
+  const base = { query: "q", markdown: "a".repeat(300), sources: [src], citationCount: 1, completionMethod: "button" };
+
+  it("ok when answer is long, sourced and completed", () => {
+    const r = classifyResult(base);
+    expect(r).toMatchObject({ success: true, status: "ok", warnings: [] });
+  });
+
+  it("failed + EXTRACTION_EMPTY when markdown is short", () => {
+    const r = classifyResult({ ...base, markdown: "short" });
+    expect(r).toMatchObject({ success: false, status: "failed", errorCode: "EXTRACTION_EMPTY", markdown: "" });
+  });
+
+  it("degraded when citations exist but no sources parsed", () => {
+    const r = classifyResult({ ...base, sources: [], citationCount: 3 });
+    expect(r.status).toBe("degraded");
+    expect(r.warnings.join()).toMatch(/drift/);
+  });
+
+  it("degraded when completion timed out", () => {
+    const r = classifyResult({ ...base, completionMethod: "timeout" });
+    expect(r.status).toBe("degraded");
+    expect(r.warnings.join()).toMatch(/truncated/);
+  });
+
+  it("no citations and no sources is ok, not degraded", () => {
+    const r = classifyResult({ ...base, sources: [], citationCount: 0 });
+    expect(r.status).toBe("ok");
+  });
+});
+
+describe("empty extraction end-to-end", () => {
+  it("returns failed, never success with a short answer", async () => {
+    state.html = "hi";
+    const result = await new SearchHandler().executeSearch("q");
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe("EXTRACTION_EMPTY");
   });
 });

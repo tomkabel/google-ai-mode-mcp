@@ -1,7 +1,7 @@
 {
   "name": "google-ai-mode-mcp",
   "version": "1.0.3",
-  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research — with adaptive stealth, bulletproof completion detection, zero-source retry, and multi-language (incl. Estonian) support.",
+  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research — Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
   "type": "module",
   "bin": {
     "google-ai-mode-mcp": "dist/index.js"

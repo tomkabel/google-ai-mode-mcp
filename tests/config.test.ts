@@ -28,14 +28,11 @@ describe("CONFIG defaults", () => {
 
     expect(config.headless).toBe(true);
     expect(config.browserTimeout).toBe(30000);
-    expect(config.stealthEnabled).toBe(true);
     expect(config.captchaTimeout).toBe(300000);
     expect(config.captchaPollInterval).toBe(3000);
     expect(config.captchaMaxConsecutive).toBe(3);
     expect(config.responseTimeout).toBe(30000);
-    expect(config.citationTimeout).toBe(5000);
     expect(config.idleTimeoutMs).toBe(600000);
-    expect(config.viewport).toEqual({ width: 1920, height: 1080 });
   });
 
   it("applies GOOGLE_AI_HEADLESS=false", async () => {
@@ -57,15 +54,15 @@ describe("CONFIG defaults", () => {
   });
 
   it("parses 1 as true for booleans", async () => {
-    process.env.GOOGLE_AI_STEALTH_ENABLED = "1";
+    process.env.GOOGLE_AI_HEADLESS = "1";
     const mod = await import("../src/config.js");
-    expect(mod.CONFIG.stealthEnabled).toBe(true);
+    expect(mod.CONFIG.headless).toBe(true);
   });
 
   it("parses 0 as false for booleans", async () => {
-    process.env.GOOGLE_AI_STEALTH_ENABLED = "0";
+    process.env.GOOGLE_AI_HEADLESS = "0";
     const mod = await import("../src/config.js");
-    expect(mod.CONFIG.stealthEnabled).toBe(false);
+    expect(mod.CONFIG.headless).toBe(false);
   });
 
   it("falls back to default for invalid boolean", async () => {
@@ -80,21 +77,6 @@ describe("CONFIG defaults", () => {
     expect(mod.CONFIG.browserProfileDir).toBe("/tmp/google-ai-mcp-test-profile");
   });
 
-  it("applies typing WPM overrides", async () => {
-    process.env.GOOGLE_AI_TYPING_WPM_MIN = "100";
-    process.env.GOOGLE_AI_TYPING_WPM_MAX = "200";
-    const mod = await import("../src/config.js");
-    expect(mod.CONFIG.typingWpmMin).toBe(100);
-    expect(mod.CONFIG.typingWpmMax).toBe(200);
-  });
-
-  it("applies delay overrides", async () => {
-    process.env.GOOGLE_AI_MIN_DELAY_MS = "50";
-    process.env.GOOGLE_AI_MAX_DELAY_MS = "200";
-    const mod = await import("../src/config.js");
-    expect(mod.CONFIG.minDelayMs).toBe(50);
-    expect(mod.CONFIG.maxDelayMs).toBe(200);
-  });
 });
 
 describe("applyBrowserOptions", () => {
@@ -131,18 +113,8 @@ describe("ensureDirectories", () => {
   it("creates data dir and profile dir", async () => {
     const mod = await import("../src/config.js");
     const fs = await import("fs");
+    mod.ensureDirectories();
     expect(fs.existsSync(mod.CONFIG.dataDir)).toBe(true);
     expect(fs.existsSync(mod.CONFIG.browserProfileDir)).toBe(true);
-  });
-});
-
-describe("VIEWPORT_SIZES", () => {
-  it("has multiple viewport sizes", async () => {
-    const mod = await import("../src/config.js");
-    expect(mod.VIEWPORT_SIZES.length).toBeGreaterThan(3);
-    for (const v of mod.VIEWPORT_SIZES) {
-      expect(v.width).toBeGreaterThan(0);
-      expect(v.height).toBeGreaterThan(0);
-    }
   });
 });
