@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Server no longer spins at 100% CPU forever after the MCP host exits. With all stdio pipes closed, the shutdown log line hit `EPIPE` on stderr; `console.error` only swallows synchronous write errors, so the async `error` event became an `uncaughtException`, whose handler logged to stderr again, an endless `nextTick` loop that starved the event loop. stderr now has a persistent `error` listener that silences logging, stdout `EPIPE` and `SIGHUP` trigger shutdown, faults during shutdown exit at once, and shutdown is capped at 10 s. Regression test: `tests/orphan-shutdown.test.ts`.
+
 ## 1.1.0 — 2026-09-22
 
 Remediation release grounded in live probes against the real AI Mode page (see `PLAN.md`).

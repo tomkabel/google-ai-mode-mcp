@@ -239,6 +239,9 @@ class GoogleAiSearchMCPServer {
         return;
       }
       shuttingDown = true;
+      process.exitCode = exitCode;
+      // Never outlive the host: if browser/server cleanup hangs, exit anyway.
+      setTimeout(() => process.exit(exitCode), 10_000).unref();
 
       log.info(`\n🛑 Received ${signal}, shutting down gracefully...`);
 
@@ -263,12 +266,17 @@ class GoogleAiSearchMCPServer {
 
     process.on("SIGINT", () => requestShutdown("SIGINT"));
     process.on("SIGTERM", () => requestShutdown("SIGTERM"));
+    process.on("SIGHUP", () => requestShutdown("SIGHUP"));
 
     // Host died without sending a signal (MCP over stdio): stdin hits EOF.
     // Without this the server + its Chrome tree leak forever.
     process.stdin.on("close", () => requestShutdown("stdin closed (host disconnected)"));
+    // Replies can no longer reach the host (EPIPE on stdout): same outcome.
+    process.stdout.on("error", () => requestShutdown("stdout closed (host disconnected)"));
 
     process.on("uncaughtException", (error) => {
+      // A fault while already shutting down must not feed a log/throw loop.
+      if (shuttingDown) process.exit(1);
       log.error(`💥 Uncaught exception: ${error}`);
       log.error(error.stack || "");
       // Crash exits non-zero so supervisors/MCP hosts see a failure, not a clean stop.
@@ -276,6 +284,7 @@ class GoogleAiSearchMCPServer {
     });
 
     process.on("unhandledRejection", (reason, promise) => {
+      if (shuttingDown) process.exit(1);
       log.error(`💥 Unhandled rejection at: ${promise}`);
       log.error(`Reason: ${reason}`);
       requestShutdown("unhandledRejection", 1);

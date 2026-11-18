@@ -100,6 +100,13 @@ export class Logger {
  */
 export const logger = new Logger();
 
+// console.error only swallows *synchronous* write errors. On a pipe whose reader
+// is gone (MCP host exited), EPIPE arrives as an async 'error' event; with no
+// listener it becomes an uncaughtException, whose handler logs again -> EPIPE ->
+// an endless nextTick loop at 100% CPU. A persistent listener absorbs it, and
+// once stderr is dead there is no one left to read logs, so stop writing.
+process.stderr.on("error", () => logger.setEnabled(false));
+
 /**
  * Convenience functions for quick logging
  */
