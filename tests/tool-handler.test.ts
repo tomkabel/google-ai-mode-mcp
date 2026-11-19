@@ -322,7 +322,7 @@ describe("ToolHandler", () => {
       }
       expect(outside).not.toContain("IGNORE PREVIOUS");
       expect(r.md).toContain(`${evil} title`);
-      expect((r.result as any).sourceCount).toBe(2);
+      expect(r.result.sourceCount).toBe(2);
     });
   });
 
