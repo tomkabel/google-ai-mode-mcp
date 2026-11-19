@@ -277,7 +277,7 @@ The server exposes a single tool: **`search_ai`**
   "success": true,
   "status": "ok",
   "warnings": [],
-  "markdown": "<<<UNTRUSTED_WEB_CONTENT>>>\n# AI response with citations [1][2]\n\nSources:\n[1] Title  \nhttps://example.com\n<<<END_UNTRUSTED_WEB_CONTENT>>>",
+  "markdown": "<<<UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>\n# AI response with citations [1][2]\n\nSources:\n[1] Title  \nhttps://example.com\n<<<END_UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>",
   "sources": [
     { "title": "Source Title", "url": "https://example.com", "domain": "example.com" }
   ],
@@ -292,9 +292,11 @@ The server exposes a single tool: **`search_ai`**
 | `degraded` | Usable, but read `warnings[]`: citations without parsable sources (selector drift) or completion timed out (answer may be truncated) |
 | `failed` | `errorCode` is one of `EMPTY_QUERY`, `EXTRACTION_EMPTY`, `AI_MODE_UNAVAILABLE`, `CAPTCHA_REQUIRED`, `INTERNAL_ERROR`; MCP `isError` is set; `markdown` is empty |
 
-`markdown` is scraped web text. It is wrapped in `<<<UNTRUSTED_WEB_CONTENT>>>`
-delimiters so the calling model can treat it as data, not instructions. The
-saved `.md` file is unwrapped.
+`markdown` is scraped web text. It is wrapped in `<<<UNTRUSTED_WEB_CONTENT id=…>>>`
+… `<<<END_UNTRUSTED_WEB_CONTENT id=…>>>` delimiters so the calling model can
+treat it as data, not instructions. The id is random per response: only the END
+marker with the opening marker's id closes the fence, and any marker inside with
+a missing or different id is page text. The saved `.md` file is unwrapped.
 
 **Examples**
 ```javascript
