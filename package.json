@@ -1,7 +1,7 @@
 {
   "name": "google-ai-mode-mcp",
   "version": "1.1.0",
-  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research \u2014 Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
+  "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research — Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
   "type": "module",
   "bin": {
     "google-ai-mode-mcp": "dist/index.js"
@@ -42,7 +42,7 @@
     "hermes-agent",
     "pi-package"
   ],
-  "author": "G\u00e9r\u00f4me Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
+  "author": "Gérôme Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -61,8 +61,10 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.5",
+    "markdown-it": "^15.0.3",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^5.0.1"
