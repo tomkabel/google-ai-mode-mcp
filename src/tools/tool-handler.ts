@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { randomUUID } from "crypto";
-import type { SearchResult, SearchOptions, ProgressCallback } from "../types.js";
+import type { SearchResult, SearchToolResult, SearchOptions, ProgressCallback } from "../types.js";
 import { SearchHandler, failed } from "../search/search-handler.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
@@ -33,10 +33,17 @@ export class ToolHandler {
       filename?: string;
     },
     sendProgress: ProgressCallback
-  ): Promise<SearchResult> {
+  ): Promise<SearchToolResult> {
     const run = this.chain.then(() => this.handleSearchAiSerial(args, sendProgress));
     this.chain = run.catch(() => {});
-    return run;
+    const { sources, ...result } = await run;
+    if (result.markdown) {
+      const id = randomUUID();
+      const runs = result.markdown.match(/`+/g) ?? [];
+      const fence = "`".repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
+      result.markdown = `<<<UNTRUSTED_WEB_CONTENT id=${id}>>>\n${fence}\n${result.markdown}\n${fence}\n<<<END_UNTRUSTED_WEB_CONTENT id=${id}>>>`;
+    }
+    return { ...result, sourceCount: sources.length };
   }
 
   private async handleSearchAiSerial(
@@ -88,11 +95,6 @@ export class ToolHandler {
           log.warning(`Failed to save file: ${error}`);
           result.saveError = error instanceof Error ? error.message : String(error);
         }
-      }
-
-      if (result.markdown) {
-        const id = randomUUID();
-        result.markdown = `<<<UNTRUSTED_WEB_CONTENT id=${id}>>>\n${result.markdown}\n<<<END_UNTRUSTED_WEB_CONTENT id=${id}>>>`;
       }
 
       // Send progress based on result

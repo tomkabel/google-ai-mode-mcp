@@ -277,10 +277,8 @@ The server exposes a single tool: **`search_ai`**
   "success": true,
   "status": "ok",
   "warnings": [],
-  "markdown": "<<<UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>\n# AI response with citations [1][2]\n\nSources:\n[1] Title  \nhttps://example.com\n<<<END_UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>",
-  "sources": [
-    { "title": "Source Title", "url": "https://example.com", "domain": "example.com" }
-  ],
+  "markdown": "<<<UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>\n```\n# AI response with citations [1][2]\n\nSources:\n[1] Title  \nhttps://example.com\n```\n<<<END_UNTRUSTED_WEB_CONTENT id=3f6c2a9e-8b1d-4c57-9e0a-5d7b2f4c1a86>>>",
+  "sourceCount": 1,
   "query": "Your query",
   "savedTo": "/path/to/results/file.md"
 }
@@ -296,7 +294,11 @@ The server exposes a single tool: **`search_ai`**
 … `<<<END_UNTRUSTED_WEB_CONTENT id=…>>>` delimiters so the calling model can
 treat it as data, not instructions. The id is random per response: only the END
 marker with the opening marker's id closes the fence, and any marker inside with
-a missing or different id is page text. The saved `.md` file is unwrapped.
+a missing or different id is page text. Inside the markers the page text sits in
+a backtick code fence one longer than its longest backtick run (minimum three), so
+a markdown renderer shows raw HTML in it as text and cannot hide the END marker.
+Source titles, URLs and publishers appear only in the fenced source list;
+`sourceCount` gives their number. The saved `.md` file is unwrapped.
 
 **Examples**
 ```javascript
