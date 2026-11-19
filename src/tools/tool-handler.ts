@@ -40,7 +40,7 @@ export class ToolHandler {
     if (result.markdown) {
       const id = randomUUID();
       const runs = result.markdown.match(/`+/g) ?? [];
-      const fence = "`".repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
+      const fence = "`".repeat(runs.reduce((m, r) => Math.max(m, r.length + 1), 3));
       result.markdown = `<<<UNTRUSTED_WEB_CONTENT id=${id}>>>\n${fence}\n${result.markdown}\n${fence}\n<<<END_UNTRUSTED_WEB_CONTENT id=${id}>>>`;
     }
     return { ...result, sourceCount: sources.length };

@@ -324,6 +324,13 @@ describe("ToolHandler", () => {
       expect(r.md).toContain(`${evil} title`);
       expect(r.result.sourceCount).toBe(2);
     });
+
+    it("sizes the fence without throwing on a body with ~200k backtick runs", async () => {
+      const r = await search("`a".repeat(200000));
+      expect(r.id).toBeDefined();
+      expect(count(r.md, "<<<END_UNTRUSTED_WEB_CONTENT")).toBe(1);
+      expect(r.closing).toBe(`<<<END_UNTRUSTED_WEB_CONTENT id=${r.id}>>>`);
+    });
   });
 
   describe("saveToFile", () => {
