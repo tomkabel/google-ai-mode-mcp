@@ -94,7 +94,7 @@ export class ToolHandler {
       }
 
       if (result.markdown) {
-        result.markdown = `${UNTRUSTED_BEGIN}\n${result.markdown}\n${UNTRUSTED_END}`;
+        result.markdown = `${UNTRUSTED_BEGIN}\n${result.markdown.replace(/[<>](?=(?:\\*[<>]){2})/g, "$& ")}\n${UNTRUSTED_END}`;
       }
 
       // Send progress based on result
