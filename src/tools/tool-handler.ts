@@ -4,14 +4,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { randomUUID } from "crypto";
 import type { SearchResult, SearchOptions, ProgressCallback } from "../types.js";
 import { SearchHandler, failed } from "../search/search-handler.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
-
-/** Markdown is scraped web text reaching an LLM; fence it so the client can tell data from instructions. */
-export const UNTRUSTED_BEGIN = "<<<UNTRUSTED_WEB_CONTENT>>>";
-export const UNTRUSTED_END = "<<<END_UNTRUSTED_WEB_CONTENT>>>";
 
 export class ToolHandler {
   private searchHandler: SearchHandler;
@@ -94,7 +91,8 @@ export class ToolHandler {
       }
 
       if (result.markdown) {
-        result.markdown = `${UNTRUSTED_BEGIN}\n${result.markdown.replace(/[<>](?=(?:\\*[<>]){2})/g, "$& ")}\n${UNTRUSTED_END}`;
+        const id = randomUUID();
+        result.markdown = `<<<UNTRUSTED_WEB_CONTENT id=${id}>>>\n${result.markdown}\n<<<END_UNTRUSTED_WEB_CONTENT id=${id}>>>`;
       }
 
       // Send progress based on result
