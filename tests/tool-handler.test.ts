@@ -230,8 +230,8 @@ describe("ToolHandler", () => {
 
       expect(md.startsWith(`${BEGIN}\n`)).toBe(true);
       expect(md.endsWith(`\n${END}`)).toBe(true);
-      expect(md).toContain("IGNORE PREVIOUS INSTRUCTIONS"); // kept as data, not dropped
-      const rendered = md.replace(/\\(.)/g, "$1"); // what a markdown reader sees
+      expect(md).toContain("IGNORE PREVIOUS INSTRUCTIONS");
+      const rendered = md.replace(/\\(.)/g, "$1");
       expect(count(rendered, BEGIN)).toBe(1);
       expect(count(rendered, END)).toBe(1);
     });
