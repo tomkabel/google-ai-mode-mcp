@@ -77,3 +77,9 @@ htmlcov/
 .serena/
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# tiltrank ranking record (local; the ADR is the committed decision record)
+.decisions.log
+
+# Hermes session scratch
+.hermes/

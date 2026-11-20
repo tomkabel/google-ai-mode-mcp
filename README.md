@@ -6,7 +6,7 @@
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.0%2B-00b894?logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
-[![npm](https://img.shields.io/npm/v/google-ai-mode-mcp.svg?logo=npm&logoColor=cb3837)](https://www.npmjs.com/package/google-ai-mode-mcp)
+[![npm](https://img.shields.io/npm/v/@tomkabel/google-ai-mode-mcp.svg?logo=npm&logoColor=cb3837)](https://www.npmjs.com/package/@tomkabel/google-ai-mode-mcp)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Fork of PleasePrompto/google-ai-mode-mcp](https://img.shields.io/badge/fork-PleasePrompto%2Fgoogle--ai--mode--mcp-8e7cc3)](https://github.com/PleasePrompto/google-ai-mode-mcp)
 
@@ -36,6 +36,8 @@ backward-compatible — drop-in for existing setups.
 | 🌐 **Estonian (`et`) support** | Estonian locales had no citation/completion/availability handling. | Full `et` coverage across citation selectors, completion indicators, cutoff markers, availability checks, and CAPTCHA text. |
 | 🚨 **Fail loud** | Every failure path returned `success: true` with an empty or sourceless answer, so the calling LLM hallucinated over the gap. | Results carry `status: "ok" \| "degraded" \| "failed"`, an `errorCode` and `warnings[]`. Under 200 chars of answer is `failed` + MCP `isError`; citations without parsable sources or a timed-out completion are `degraded` with a warning you can branch on. |
 | 🆕 **Current Google icon selector** | The completion "thumbs-up" SVG selector had gone stale. | Updated to the current Material icon `viewBox="0 0 24 24"`; removed the overly-generic Estonian text indicator that caused premature completion. |
+| 🛑 **No orphan CPU spin** | When an MCP host exited without a signal, the server lived on with dead stdio pipes and burned a full core forever (upstream `1.0.3`: 31.6 CPU-hours over 43 h uptime). | Stdin `close`, stdout `EPIPE`, and `SIGHUP`/`SIGTERM`/`SIGINT` all trigger a bounded shutdown; a dead stderr silences logging instead of looping on `EPIPE`. Locked by `tests/orphan-shutdown.test.ts`, which fails on CPU ticks burned after a host disconnect. |
+| 🔌 **Harness-wiring verifier** | Clients configured with `npx google-ai-mode-mcp@latest` silently ran the **archived** upstream `1.0.3` — fixes and all — instead of this fork. | `npm run check:harness` parses every configured client (Claude, Codex, Zed, Kilo, Kimi Code, Hermes, pi), proves each points at this repo's `dist/index.js`, that `dist/` is a byte-identical compile of `src/`, and that the shutdown fix is compiled in; `--spawn` adds a live MCP `tools/list` handshake. |
 
 **Net effect:** more answers complete correctly on the first try, fewer CAPTCHAs,
 cleaner citations, a wider language net, and failures you can actually see.
@@ -110,31 +112,70 @@ supported locales (EN, DE, NL, ES, FR, IT, **ET**).
 
 ## 📦 Installation
 
-Works with any MCP-compatible client. Pick your setup:
+Works with any MCP-compatible client. Every snippet runs the **pinned published
+fork** — no global install, no local clone required, and no way to drift onto
+another version.
+
+> ⚠️ **Never install `google-ai-mode-mcp` (unscoped).** That is the **archived**
+> upstream package, stuck at npm `1.0.3`, with no shutdown handling: an MCP host
+> that exits without a signal leaves the server alive on dead stdio pipes,
+> spinning a full CPU core indefinitely (measured: `1d07h38m` in 43 h of uptime,
+> see `bug.md`). This fork is published as **`@tomkabel/google-ai-mode-mcp`**.
+
+**0. Nothing to install** — `npx` fetches the pinned version on first use:
+
+```bash
+npx -y @tomkabel/google-ai-mode-mcp@1.1.0   # verifies the MCP handshake, then waits for a client
+```
 
 **Claude Code**
 ```bash
-claude mcp add google-ai-search npx google-ai-mode-mcp@latest
+claude mcp add google-ai-search npx -y @tomkabel/google-ai-mode-mcp@1.1.0
 ```
 
-**Codex**
-```bash
-codex mcp add google-ai-search -- npx google-ai-mode-mcp@latest
+**Codex** — `~/.codex/config.toml`:
+```toml
+[mcp_servers.google-ai-search]
+command = "npx"
+args = [ "-y", "@tomkabel/google-ai-mode-mcp@1.1.0" ]
+```
+
+**Zed** — `~/.config/zed/settings.json`, under `context_servers`:
+```json
+"mcp-server-google-ai-search": {
+  "enabled": true,
+  "command": "npx",
+  "args": ["-y", "@tomkabel/google-ai-mode-mcp@1.1.0"]
+}
+```
+
+**Kilo Code** — `~/.config/kilo/kilo.json`, under `mcp`:
+```json
+"google-ai-search": {
+  "type": "local",
+  "command": ["npx", "-y", "@tomkabel/google-ai-mode-mcp@1.1.0"],
+  "enabled": true
+}
+```
+
+**Kimi Code** — `~/.kimi-code/mcp.json`:
+```json
+{ "mcpServers": { "google-ai-search": { "command": "npx", "args": ["-y", "@tomkabel/google-ai-mode-mcp@1.1.0"] } } }
 ```
 
 **Cline**
 ```bash
-cline mcp add google-ai-search -- npx google-ai-mode-mcp@latest
+cline mcp add google-ai-search -- npx -y @tomkabel/google-ai-mode-mcp@1.1.0
 ```
 
 **Gemini**
 ```bash
-gemini mcp add google-ai-mode npx -y google-ai-mode-mcp@latest --scope user
+gemini mcp add google-ai-search npx -y @tomkabel/google-ai-mode-mcp@1.1.0 --scope user
 ```
 
 **VS Code**
 ```bash
-code --add-mcp '{"name":"google-ai-search","command":"npx","args":["google-ai-mode-mcp@latest"]}'
+code --add-mcp '{"name":"google-ai-search","command":"npx","args":["-y","@tomkabel/google-ai-mode-mcp@1.1.0"]}'
 ```
 
 **Hermes Agent** — add to `~/.hermes/config.yaml` under `mcp_servers:`:
@@ -142,26 +183,27 @@ code --add-mcp '{"name":"google-ai-search","command":"npx","args":["google-ai-mo
 mcp_servers:
   google-ai-search:
     command: npx
-    args: ["google-ai-mode-mcp@latest"]
+    args: ["-y", "@tomkabel/google-ai-mode-mcp@1.1.0"]
     connect_timeout: 45.0
     enabled: true
 ```
 
 **pi** (no built-in MCP client; this repo ships a pi extension that bridges it)
 ```bash
-git clone https://github.com/tomkabel/google-ai-mode-mcp && cd google-ai-mode-mcp
-npm install && npm run build
-pi install "$PWD"        # registers extensions/google-ai-search.ts → `search_ai` tool
+pi install "/path/to/google-ai-mode-mcp"   # registers extensions/google-ai-search.ts → `search_ai` tool
 ```
+The extension spawns `npx -y @tomkabel/google-ai-mode-mcp@<version>`; the version
+is a literal in `extensions/google-ai-search.ts` and a test fails if it drifts
+from `package.json`.
 
-**Cursor, Windsurf, Zed, or any other MCP client** — add to your config file:
+**Cursor, Windsurf, or any other MCP client** — add to your config file:
 
 ```json
 {
   "mcpServers": {
     "google-ai-search": {
       "command": "npx",
-      "args": ["google-ai-mode-mcp@latest"]
+      "args": ["-y", "@tomkabel/google-ai-mode-mcp@1.1.0"]
     }
   }
 }
@@ -169,6 +211,12 @@ pi install "$PWD"        # registers extensions/google-ai-search.ts → `search_
 
 > Cursor uses `~/.cursor/mcp.json`; Windsurf and Zed have their own settings files.
 > Check your client's docs for the config location.
+
+**Work from a local build instead** (developing on this repo, or offline): clone,
+`npm install && npm run build`, then point a client at `node /absolute/path/to/google-ai-mode-mcp/dist/index.js`
+in exactly the same position as the `npx -y …` above. `npm run check:harness`
+accepts either form and verifies whichever you chose; it fails if `dist/` has
+gone stale relative to `src/`.
 
 **Linux / WSL on a headless host (Codex, Docker, SSH)?** If you hit a
 "Missing X-Server" error when the browser must appear for CAPTCHA solving, wrap
@@ -179,7 +227,7 @@ it with `xvfb-run`:
   "mcpServers": {
     "google-ai-search": {
       "command": "xvfb-run",
-      "args": ["-a", "npx", "google-ai-mode-mcp@latest"]
+      "args": ["-a", "npx", "-y", "@tomkabel/google-ai-mode-mcp@1.1.0"]
     }
   }
 }
@@ -188,6 +236,30 @@ it with `xvfb-run`:
 ```bash
 sudo apt-get install xvfb   # if needed
 ```
+
+### Verify every harness is on this build
+
+`scripts/check-harness-wiring.mjs` resolves each configured client (Claude,
+Codex, Zed, Kilo, Kimi Code, Hermes, pi) and asserts its resolved argv is an
+accepted target: either this repo's `dist/index.js` — verified as a
+byte-identical compile of `src/` (`--deep`) carrying the shutdown fix — or the
+pinned `@tomkabel/google-ai-mode-mcp@<version>`, whose registry tarball must
+have the same shasum as `npm pack` of this tree, so the published artifact is
+provably this code. It also fails if anything still resolves the archived
+unscoped package or if an npx cache holds it. Surfaces not configured on the
+machine are reported as skipped, so the check is portable; `--require-all`
+turns a missing surface into a failure.
+
+```bash
+npm run check:harness            # deep build check + per-surface wiring (runs inside `npm run check`)
+npm run check:harness:spawn      # + a live MCP handshake per distinct wiring (requires all surfaces)
+npm run check:harness:selftest   # mutation selftest: every failure code must fire on its own mutation
+npm run check:orphans            # report-only scan for orphaned MCP servers burning CPU
+```
+
+Exit code is non-zero if **any** code other than `PASS` (or a reported skip)
+appears, so it drops straight into a pre-flight script.
+
 
 ---
 

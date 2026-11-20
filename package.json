@@ -1,5 +1,5 @@
 {
-  "name": "google-ai-mode-mcp",
+  "name": "@tomkabel/google-ai-mode-mcp",
   "version": "1.1.0",
   "description": "MCP server that plugs any LLM into Google AI Mode for free, cited, token-efficient web research \u2014 Patchright + persistent profile, content-stable completion detection, machine-readable ok/degraded/failed status, multi-language (incl. Estonian) support.",
   "type": "module",
@@ -19,9 +19,14 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsc --noEmit && vitest run",
+    "check": "npm run check:code && npm run check:harness",
+    "check:code": "tsc --noEmit && vitest run",
     "smoke": "npm run build && node tests/smoke.mjs",
-    "prepublishOnly": "npm run check",
+    "check:harness": "node scripts/check-harness-wiring.mjs --deep",
+    "check:harness:spawn": "node scripts/check-harness-wiring.mjs --deep --spawn --require-all",
+    "check:harness:selftest": "node scripts/selftest-harness-wiring.mjs",
+    "check:orphans": "node scripts/check-orphan-mcp.mjs --min-cpu 5",
+    "prepublishOnly": "npm run check:code",
     "prepare": "npm run build"
   },
   "keywords": [
@@ -43,14 +48,20 @@
     "pi-package"
   ],
   "author": "G\u00e9r\u00f4me Dexheimer <hello@geromedexheimer.de> (https://github.com/PleasePrompto)",
+  "contributors": [
+    "Tom Kristian Abel (fork maintainer: https://github.com/tomkabel)"
+  ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PleasePrompto/google-ai-mode-mcp.git"
+    "url": "git+https://github.com/tomkabel/google-ai-mode-mcp.git"
   },
-  "homepage": "https://github.com/PleasePrompto/google-ai-mode-mcp#readme",
+  "homepage": "https://github.com/tomkabel/google-ai-mode-mcp#readme",
   "bugs": {
-    "url": "https://github.com/PleasePrompto/google-ai-mode-mcp/issues"
+    "url": "https://github.com/tomkabel/google-ai-mode-mcp/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
