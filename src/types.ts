@@ -30,6 +30,9 @@ export interface SearchResult {
   saveError?: string; // Error message if saving failed
 }
 
+/** search_ai tool response: source fields are page text, so only their count leaves the fence. */
+export type SearchToolResult = Omit<SearchResult, "sources"> & { sourceCount: number };
+
 /**
  * Source information extracted from Google AI search
  */

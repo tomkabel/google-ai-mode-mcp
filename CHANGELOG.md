@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Breaking
+- `search_ai` no longer returns `sources`; it returns `sourceCount` instead. Source titles, URLs and publishers are page text and appeared outside the untrusted fence. They remain in the source list inside the fenced `markdown`.
+- The fenced `markdown` body now sits in a backtick code fence inside the markers, one backtick longer than the longest backtick run in the body (minimum three). Raw HTML such as `<!--`, `<script>` or `<style>` in page text could hide the END marker in a renderer with HTML enabled (e.g. markdown-it `html: true`); in a code fence it renders as text. Clients that strip the markers must also strip the fence lines. Saved files are unchanged.
+
 ### Fixed
 - Server no longer spins at 100% CPU forever after the MCP host exits. With all stdio pipes closed, the shutdown log line hit `EPIPE` on stderr; `console.error` only swallows synchronous write errors, so the async `error` event became an `uncaughtException`, whose handler logged to stderr again, an endless `nextTick` loop that starved the event loop. stderr now has a persistent `error` listener that silences logging, stdout `EPIPE` and `SIGHUP` trigger shutdown, faults during shutdown exit at once, and shutdown is capped at 10 s. Regression test: `tests/orphan-shutdown.test.ts`.
 - Page text could close the untrusted-content fence early: the static `<<<END_UNTRUSTED_WEB_CONTENT>>>` marker survived as HTML entities, emphasis splits, zero-width or soft-hyphen characters and backslash escapes. Both markers now carry a random per-response id, `<<<UNTRUSTED_WEB_CONTENT id=…>>>` … `<<<END_UNTRUSTED_WEB_CONTENT id=…>>>`; only the END marker with the opening id closes the fence, and page text passes through unaltered. Clients that matched the old bare markers must match the `id=` form. Saved files stay unwrapped.
