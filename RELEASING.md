@@ -153,3 +153,9 @@ npm audit signatures
 - **The workflow has never run.** Its first real execution is the validation
   publish in step 4; the structural invariants are enforced by V2, not by
   experience.
+- **V2 degrades to `SKIPPED_visibility_unprobed` when it cannot reach `gh`.**
+  That is deliberate — a gate that cannot read the live visibility must not
+  invent one — but it means a green run has to be read together with the skip
+  count. Two skips means the disclosure was checked for *presence* only, not for
+  freshness. `SKIPPED_attestations_repo_private` is the expected steady state
+  while this repository is private.
