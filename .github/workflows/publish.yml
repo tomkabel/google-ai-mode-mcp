@@ -1,0 +1,83 @@
+name: publish
+
+# Stages a release for maintainer approval over npm trusted publishing (OIDC).
+#
+# Read RELEASING.md before changing anything here. The trusted-publisher
+# connection on npmjs.com binds to THIS FILENAME and to the "npm-publish"
+# environment, and those bindings are immutable once created. A connection that
+# does not complete its first successful publish within 2 days expires and has
+# to be recreated.
+#
+# Runner class matters: npm supports trusted publishing only on cloud-hosted
+# runners. Self-hosted runners are not supported, so `runs-on` must stay a
+# GitHub-hosted label.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: Stage the release for maintainer approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.22.3"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Pin npm to the version that produced the verified tarball
+        run: npm install -g npm@12.2.3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Require the toolchain to match the runbook pins
+        run: |
+          set -euo pipefail
+          got_node="$(node -p 'process.versions.node')"
+          [ "$got_node" = "24.22.3" ] || { echo "node ${got_node} != 24.22.3 (pinned: tarball reproducibility)"; exit 1; }
+          got_npm="$(npm -v)"
+          [ "$got_npm" = "12.2.3" ] || { echo "npm ${got_npm} != 12.2.3 (pinned: tarball reproducibility)"; exit 1; }
+
+      - name: Require the tag to match package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          want="v$(npm pkg get version | tr -d '"')"
+          got="${GITHUB_REF_NAME}"
+          [ "$want" = "$got" ] || { echo "tag ${got} does not match package.json (${want})"; exit 1; }
+
+      - name: Run the release gate (tsc + unit tests)
+        run: npm run check:code
+
+      - name: Verify the publish posture (V2)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-publish-posture.mjs
+
+      - name: Stage the release for maintainer approval
+        run: npm stage publish --tag latest --access public

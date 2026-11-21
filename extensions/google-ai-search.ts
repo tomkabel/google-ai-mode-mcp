@@ -1,18 +1,24 @@
 /**
  * pi extension: exposes this repo's MCP server as a native pi tool.
  *
- * pi has no built-in MCP client, so this spawns `dist/index.js` over stdio
- * with the MCP SDK client (already a dependency) and forwards `search_ai`.
- * Install with `pi install /path/to/google-ai-mode-mcp` (build first).
+ * pi has no built-in MCP client, so this spawns the **published** server over
+ * stdio with the MCP SDK client (already a dependency) and forwards `search_ai`.
+ * Install with `pi install /path/to/google-ai-mode-mcp`.
+ *
+ * The spec is a literal pin on purpose. The unscoped `google-ai-mode-mcp` on npm
+ * is the archived upstream, stuck at 1.0.3, which spins a core at ~100% after
+ * its host exits; and a dynamic pin would let this extension drift onto whatever
+ * `latest` resolves to. The matching version is asserted against package.json by
+ * tests/harness-wiring-doc.test.ts, so a version bump fails the suite until this
+ * line is bumped with it.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 
-const SERVER = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+const SERVER_SPEC = "@tomkabel/google-ai-mode-mcp@1.1.0";
 
 export default function (pi: ExtensionAPI) {
   let client: Client | null = null;
@@ -20,7 +26,7 @@ export default function (pi: ExtensionAPI) {
   async function connect(): Promise<Client> {
     if (client) return client;
     const c = new Client({ name: "pi-google-ai-search", version: "1.0.0" });
-    await c.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER], stderr: "ignore" }));
+    await c.connect(new StdioClientTransport({ command: "npx", args: ["-y", SERVER_SPEC], stderr: "ignore" }));
     client = c;
     return c;
   }
