@@ -275,6 +275,31 @@ function localPackShasum() {
   }
 }
 
+/**
+ * Published versions of a package, as DATA.
+ *
+ * The skip-vs-fail decision must not be read off npm's human-facing error text:
+ * that text disappears when the caller silences npm (`--silent`, or
+ * `npm_config_loglevel=silent` anywhere in the environment), which used to turn
+ * "this version is not published yet" into an E10 failure. Command *results* on
+ * stdout survive a log-level change; log output does not.
+ */
+function registryVersions(name) {
+  if (REGISTRY_SHASUM) return null; // injected: presence is asserted, not probed
+  try {
+    const out = execFileSync("npm", ["view", name, "versions", "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    });
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (e) {
+    const line = String(e.stderr || e.message).split("\n").find((l) => l.trim());
+    return { error: line ?? "npm view failed" };
+  }
+}
+
 /** Registry shasum for a published name@version (public package: no token needed). */
 function registryShasum(name, v) {
   if (REGISTRY_SHASUM) return REGISTRY_SHASUM; // injected (offline / mutation selftest)
@@ -294,16 +319,27 @@ function registryShasum(name, v) {
 /** Proves the pinned published tarball IS this tree's build. */
 function checkPublishedArtifact() {
   const v = version();
+  const versions = registryVersions(PUBLISHED_NAME);
+  if (versions !== null && !Array.isArray(versions)) {
+    // The package itself could not be read (auth, network): a failure, and not
+    // the "not published yet" state.
+    record("published", "E10_published_artifact_mismatch", `${PUBLISHED_NAME} not resolvable: ${versions.error}`);
+    return;
+  }
+  if (Array.isArray(versions) && !versions.includes(v)) {
+    // Asked and answered from the registry's OWN version list: this version is
+    // simply not published yet — the normal state between a version bump and a
+    // release. It is visible in the output and counted in the verdict. This is
+    // deliberately not inferred from npm's error text, which a silenced log
+    // level removes; the same registry state must not produce two verdicts.
+    return skip(
+      "published",
+      `${PUBLISHED_NAME}@${v} is not on the registry yet (registry holds ${versions.length}: ${versions.join(", ")})`,
+    );
+  }
   const registry = registryShasum(PUBLISHED_NAME, v);
   if (typeof registry !== "string") {
-    // A version that is simply not published yet is reported as a skip rather
-    // than a failure: it is visible in the output and counted in the verdict,
-    // and it is the state you are in between bumping the version and publishing
-    // it. Any OTHER registry error (auth, network, mismatch) stays a failure.
-    if (/E404|404 Not Found|is not in this registry/i.test(registry.error)) {
-      return skip("published", `${PUBLISHED_NAME}@${v} is not on the registry yet`);
-    }
-    record("published", "E10_published_artifact_mismatch", `${PUBLISHED_NAME}@${v} not resolvable: ${registry.error}`);
+    record("published", "E10_published_artifact_mismatch", `${PUBLISHED_NAME}@${v} shasum unreadable: ${registry.error}`);
     return;
   }
   let local;

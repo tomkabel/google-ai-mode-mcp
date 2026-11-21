@@ -42,7 +42,7 @@ const run = (home, repo = REPO, opts = {}) => {
   let out = "";
   let code = 0;
   try {
-    out = execFileSync(process.execPath, args, { encoding: "utf8" });
+    out = execFileSync(process.execPath, args, { encoding: "utf8", env: opts.env ?? process.env });
   } catch (e) {
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
     code = e.status ?? 1;
@@ -301,6 +301,39 @@ for (const c of cases) {
   console.log(`        expected ${c.expect.padEnd(30)} observed ${String(observed ?? "(none)").padEnd(30)} exit ${code}`);
   if (cfg.nonVacuous === false) console.log(`        MUTATION WAS VACUOUS — the checked field did not change`);
   if (!ok && code === 0 && c.expect !== "PASS") console.log(`        checker exited 0 while a non-PASS code was present\n${out}`);
+}
+
+// ---------- regression: the published verdict must not depend on npm's log level
+//
+// `npm --silent`, and `npm_config_loglevel=silent` from any caller, removes npm's
+// human-facing error text. Deciding skip-vs-fail by reading that text made ONE
+// registry state report E10 when silenced and SKIPPED_absent when not. The
+// registry's version list is DATA and survives the change; this asserts the
+// verdict survives it too. Non-vacuity rests on the measured pair taken from the
+// pre-fix checker — E10 under silence, SKIPPED_absent without — not on assertion.
+{
+  const home = join(ROOT, "home-loglevel-invariance");
+  mkdirSync(home, { recursive: true });
+  writeJsonHome(home, { published: true, pi: null });
+
+  const codeOf = ({ codes }) => {
+    for (const [code, surfaces] of Object.entries(codes)) if (surfaces.includes("published")) return code;
+    return "(none)";
+  };
+  const loud = run(home, REPO, {});
+  const quiet = run(home, REPO, { env: { ...process.env, npm_config_loglevel: "silent" } });
+  const loudCode = codeOf(loud);
+  const quietCode = codeOf(quiet);
+  const same = loudCode === quietCode && loud.code === quiet.code;
+
+  if (!same) failures++;
+  console.log(`  ${same ? "OK  " : "BAD "} log-level invariance of the published verdict`);
+  console.log(`        npm_config_loglevel unset     ${loudCode.padEnd(30)} exit ${loud.code}`);
+  console.log(`        npm_config_loglevel=silent    ${quietCode.padEnd(30)} exit ${quiet.code}`);
+  if (!same)
+    console.log(
+      `        one registry state produced two verdicts — the skip-vs-fail decision is reading npm's log text, not the registry`,
+    );
 }
 
 rmSync(ROOT, { recursive: true, force: true });

@@ -154,17 +154,14 @@ npm audit signatures
   selftest reaches them. Treat them as untested code until the repository is
   public. `P14` is deliberately fail-closed: a registry that cannot be read is
   reported as a failure, never as "no attestation".
-- **V1's classification of an unpublished version depends on npm's log level.**
-  Measured on this machine against one unchanged registry state: `npm run
-  check:harness` reports `SKIPPED_absent … is not on the registry yet` and exits
-  0, while `npm run check:harness --silent` reports `E10_published_artifact_mismatch
-  … not resolvable` and exits 1. `--silent` sets `npm_config_loglevel=silent` in
-  the child environment, which empties the nested `npm view` stderr, and V1 falls
-  back to the exec error message — which carries no `E404` — before deciding
-  skip-vs-fail. Same registry, two verdicts. This is unfixed on purpose: V1 is
-  the frozen verifier whose byte-identical state is what makes its shasum claim
-  honest, so the fix belongs in a deliberate change to V1, not in a drive-by edit
-  from this branch. Until then, invoke it without `--silent`.
+- **V1's unpublished-version classification no longer depends on npm's log
+  level.** It used to: `--silent`, or `npm_config_loglevel=silent` from any
+  caller, removes npm's human-facing error text, so one unchanged registry state
+  reported `E10_published_artifact_mismatch` with exit 1 when silenced and
+  `SKIPPED_absent` with exit 0 when not. The skip-vs-fail decision is now read
+  from the registry's own version list — command output, which survives a
+  log-level change — and `npm run check:harness:selftest` asserts the two levels
+  agree rather than trusting either one.
 - **npm 12 install-script defaults may affect consumers.** npm 12 sets
   `allowScripts` off, so a dependency's `postinstall` no longer runs on a plain
   install. If `patchright` downloads a browser in its `postinstall`, a fresh
