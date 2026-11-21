@@ -19,7 +19,7 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run check:code && npm run check:harness && npm run check:publish-posture",
+    "check": "npm run check:code && npm run check:publish-posture && npm run check:harness",
     "check:code": "tsc --noEmit && vitest run",
     "check:publish-posture": "node scripts/check-publish-posture.mjs",
     "check:publish-posture:mutate": "node scripts/check-publish-posture.mjs --mutate",

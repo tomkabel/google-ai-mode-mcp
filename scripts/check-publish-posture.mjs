@@ -31,6 +31,7 @@
  *   P11_toolchain_unpinned             runner npm not pinned to the verified version
  *   P12_cache_enabled                  release build uses a dependency cache
  *   P13_attestation_absent             public repo, published version, no attestation
+ *   P14_registry_unreadable            the registry could not be read (not the same as "absent")
  *   SKIPPED_attestations_repo_private  documented gap — see the RELEASING.md disclosure
  *   SKIPPED_registry_unpublished       version not on the registry yet
  *   SKIPPED_visibility_unprobed        no `gh` auth to read live visibility
@@ -238,7 +239,7 @@ if (live.value === null) {
 } else {
   try {
     const out = execFileSync("npm", ["view", `${pkgName}@${pkgVersion}`, "dist.attestations", "--json"], {
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
     }).trim();
     if (out && out !== "undefined" && out !== "{}" && out !== "null") {
@@ -250,8 +251,17 @@ if (live.value === null) {
         `${pkgName}@${pkgVersion} is published with no attestation although the repository is public`,
       );
     }
-  } catch {
-    record("provenance", "SKIPPED_registry_unpublished", `${pkgName}@${pkgVersion} is not on the registry yet`);
+  } catch (e) {
+    // Fail closed: a registry that cannot be READ is not a registry that says
+    // "no attestation". Only an explicit not-found is a skip — and note that
+    // npm's stderr is empty under loglevel=silent, in which case this lands on
+    // P14 rather than inventing a skip.
+    const line = String(e.stderr || e.message).split("\n").find((l) => l.trim()) ?? "npm view failed";
+    if (/E404|404 Not Found|is not in this registry|No match found for version/i.test(line)) {
+      record("provenance", "SKIPPED_registry_unpublished", `${pkgName}@${pkgVersion} is not on the registry yet`);
+    } else {
+      record("provenance", "P14_registry_unreadable", `${pkgName}@${pkgVersion} could not be read: ${line}`);
+    }
   }
 }
 
@@ -424,7 +434,8 @@ if (MUTATE) {
     }
   }
   console.log(`\n${caught}/${MUTATIONS.length} mutations caught, ${bad} vacuous or missed`);
-  console.log("UNEXERCISED: P13_attestation_absent needs a public repository; unreachable from this tree.");
+  console.log("UNEXERCISED: P13_attestation_absent and P14_registry_unreadable need a public repository plus a live registry;");
+  console.log("             neither is reachable from this tree, so neither is covered by the mutations above.");
   if (bad > 0) process.exit(2);
 }
 

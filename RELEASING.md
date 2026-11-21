@@ -139,9 +139,22 @@ npm audit signatures
 
 ## Known gaps and unverified items
 
-- **`P13_attestation_absent` is unexercised.** It can only fire when the
-  repository is public, so no mutation in the selftest reaches it. Treat the
-  public-branch of that check as untested code until the repository is public.
+- **`P13_attestation_absent` and `P14_registry_unreadable` are unexercised.** Both
+  need a public repository and a live registry call, so no mutation in the
+  selftest reaches them. Treat them as untested code until the repository is
+  public. `P14` is deliberately fail-closed: a registry that cannot be read is
+  reported as a failure, never as "no attestation".
+- **V1's classification of an unpublished version depends on npm's log level.**
+  Measured on this machine against one unchanged registry state: `npm run
+  check:harness` reports `SKIPPED_absent … is not on the registry yet` and exits
+  0, while `npm run check:harness --silent` reports `E10_published_artifact_mismatch
+  … not resolvable` and exits 1. `--silent` sets `npm_config_loglevel=silent` in
+  the child environment, which empties the nested `npm view` stderr, and V1 falls
+  back to the exec error message — which carries no `E404` — before deciding
+  skip-vs-fail. Same registry, two verdicts. This is unfixed on purpose: V1 is
+  the frozen verifier whose byte-identical state is what makes its shasum claim
+  honest, so the fix belongs in a deliberate change to V1, not in a drive-by edit
+  from this branch. Until then, invoke it without `--silent`.
 - **npm 12 install-script defaults may affect consumers.** npm 12 sets
   `allowScripts` off, so a dependency's `postinstall` no longer runs on a plain
   install. If `patchright` downloads a browser in its `postinstall`, a fresh
