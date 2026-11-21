@@ -298,10 +298,20 @@ if (MUTATE) {
     return dir;
   };
 
+  // The declared visibility is READ from the document, never hardcoded: the
+  // harness must not assume which side of the flip the tree is on, or the clean
+  // baseline goes red the moment the repository is made public (it did).
+  let declared = "private";
+  try {
+    declared = (fs.readFileSync(path.join(ROOT, DOC_REL), "utf8").match(DISCLOSURE_RE) ?? [])[1]?.toLowerCase() ?? "private";
+  } catch {
+    /* no doc: P01/P02 already decide that, and the flip mutation reports itself */
+  }
+
   // A red tree is a legitimate verdict, not a crash: read the codes from a
   // non-zero exit instead of letting the runner turn it into an exception.
   const runJudge = (dir) => {
-    const r = spawnSync(process.execPath, [SELF, "--root", dir, "--visibility", "private", "--json"], {
+    const r = spawnSync(process.execPath, [SELF, "--root", dir, "--visibility", declared, "--json"], {
       encoding: "utf-8",
     });
     if (!r.stdout) throw new Error(`judge produced no verdict (status ${r.status}): ${r.stderr}`);
@@ -344,8 +354,8 @@ if (MUTATE) {
       expected: "P03_disclosure_visibility_stale",
       file: "doc",
       kind: "replace",
-      pattern: /(provenance-disclosure:\s*repository visibility is\s+)private/i,
-      repl: "$1public",
+      pattern: /(provenance-disclosure:\s*repository visibility is\s+)(public|private)/i,
+      repl: (_m, prefix, word) => prefix + (word.toLowerCase() === "private" ? "public" : "private"),
     },
     { name: "workflow-removed", expected: "P04_workflow_missing", file: "wf", kind: "remove" },
     { name: "workflow-emptied", expected: "P05_workflow_malformed", file: "wf", kind: "empty" },
@@ -434,8 +444,8 @@ if (MUTATE) {
     }
   }
   console.log(`\n${caught}/${MUTATIONS.length} mutations caught, ${bad} vacuous or missed`);
-  console.log("UNEXERCISED: P13_attestation_absent and P14_registry_unreadable need a public repository plus a live registry;");
-  console.log("             neither is reachable from this tree, so neither is covered by the mutations above.");
+  console.log("UNEXERCISED: P13_attestation_absent and P14_registry_unreadable are reached only through a live");
+  console.log("             registry answer about a PUBLISHED version, so no mutation above can fire them.");
   if (bad > 0) process.exit(2);
 }
 
