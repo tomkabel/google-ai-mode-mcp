@@ -43,6 +43,13 @@ Already true, and verified rather than assumed:
   picked up a runner 3 s after the push and completed `success`.
 - `README.md` advertises `@tomkabel/google-ai-mode-mcp@1.1.0`, which currently
   returns `E404` because that version is staged and not yet approved.
+- That makes the pi extension **unable to start**. `npm run check:harness:spawn`
+  reports `E09_spawn_failed: npx -y @tomkabel/google-ai-mode-mcp@1.1.0: exited
+  127 before handshake`, while the other six surfaces run this repo's `dist/`
+  and complete a real `tools/list` with `search_ai` listed. So "not published
+  yet" is a SKIP for V1's artifact comparison but a genuine runtime outage for
+  the one surface that spawns the published package. Approving the staged
+  `1.1.0` is what closes it; nothing in this repository can.
 
 Not yet done: the npm trusted-publisher connection does not exist. Nothing on
 npmjs.com has been changed.
@@ -126,6 +133,9 @@ nothing.
 ```bash
 # V1 — registry artifact == this tree's build (green once 1.1.0 is approved)
 node scripts/check-harness-wiring.mjs --deep
+
+# Boot check — every wired surface completes a real MCP tools/list handshake
+npm run check:harness:spawn
 
 # V2 — pipeline posture + disclosure honesty (must be green)
 node scripts/check-publish-posture.mjs
