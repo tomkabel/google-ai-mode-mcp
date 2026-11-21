@@ -6,26 +6,29 @@ machine-checked contract, not prose.
 
 ## Provenance status — disclosure
 
-<!-- provenance-disclosure: repository visibility is PRIVATE, so npm generates no provenance attestation for any release. -->
+<!-- provenance-disclosure: repository visibility is PUBLIC, so npm generates a provenance attestation for releases published through this workflow. -->
 
-A private repository is a hard ceiling on this pipeline. `docs.npmjs.com/trusted-publishers`
-states provenance is generated only when **all** of these hold: publishing via
-trusted publishing, publishing from a *public* repository, publishing a public
-package. It adds, explicitly, that provenance is **not supported for private
-repositories even when publishing public packages**. The package is public; the
-repository is not.
+`docs.npmjs.com/trusted-publishers` states provenance is generated only when
+**all** of these hold: publishing via trusted publishing, publishing from a
+*public* repository, publishing a public package. The repository was made public
+on 2026-11-21 (ADR 0003), which is the change that lifted the ceiling — before
+it, npm generated no attestation regardless of how the pipeline was configured,
+because provenance is `not supported for private repositories even when
+publishing public packages`.
 
-So today a consumer can verify *what* was published (registry shasum, and the
-shasums this repo checks against it) but cannot verify *where and how* it was
-built. Making the repository public is the single change that lifts this, and it
-is a decision with its own cost: every commit, this file and the ADR become
-world-readable.
+The guarantee is forward-looking, and this is the part that is easy to overstate:
+**no artifact published so far carries an attestation.** The registry holds
+`0.0.0-stage`, which predates this pipeline. The first attested artifact will be
+the first version published through `publish.yml`.
 
-V2 enforces the honesty of this paragraph: it fails with `P02_disclosure_missing`
-if the line above is removed, and with `P03_disclosure_visibility_stale` if the
-repository's live visibility stops matching the word `PRIVATE` in it. Flipping
-the repository to public therefore *forces* this paragraph to be rewritten rather
-than letting it quietly become false.
+V2 enforces the honesty of this paragraph rather than trusting it: it fails with
+`P02_disclosure_missing` if the line above is removed, with
+`P03_disclosure_visibility_stale` if the repository's live visibility stops
+matching the word `PUBLIC` in it, and with `P13_attestation_absent` if a version
+is published from a public repository while carrying no attestation. Making the
+repository private again therefore forces this section to be rewritten instead of
+quietly becoming false; attestations already issued stay valid, but no new ones
+would be generated.
 
 ## Measured state (2026-11-21)
 
@@ -50,6 +53,12 @@ Already true, and verified rather than assumed:
   yet" is a SKIP for V1's artifact comparison but a genuine runtime outage for
   the one surface that spawns the published package. Approving the staged
   `1.1.0` is what closes it; nothing in this repository can.
+- The repository is **public** as of 2026-11-21 (ADR 0003) — the change that
+  makes provenance possible at all. Secret scanning, push protection and
+  Dependabot security updates are enabled. `secret_scanning_validity_checks` and
+  `secret_scanning_non_provider_patterns` remain `disabled`: the settings API
+  accepts the request and does not apply it, so treat them as unavailable on this
+  account rather than as configured.
 
 Not yet done: the npm trusted-publisher connection does not exist. Nothing on
 npmjs.com has been changed.
@@ -149,11 +158,12 @@ npm audit signatures
 
 ## Known gaps and unverified items
 
-- **`P13_attestation_absent` and `P14_registry_unreadable` are unexercised.** Both
-  need a public repository and a live registry call, so no mutation in the
-  selftest reaches them. Treat them as untested code until the repository is
-  public. `P14` is deliberately fail-closed: a registry that cannot be read is
-  reported as a failure, never as "no attestation".
+- **`P13_attestation_absent` and `P14_registry_unreadable` have never fired.** The
+  repository is public now, so V2 takes that branch on every run, but neither code
+  can fire until a version is published: both are reached only through a live
+  registry answer about a published version, and no mutation in the selftest
+  reaches them. `P14` is deliberately fail-closed — a registry that cannot be read
+  is reported as a failure, never as "no attestation".
 - **V1's unpublished-version classification no longer depends on npm's log
   level.** It used to: `--silent`, or `npm_config_loglevel=silent` from any
   caller, removes npm's human-facing error text, so one unchanged registry state
